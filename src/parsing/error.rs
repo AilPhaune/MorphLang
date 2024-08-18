@@ -23,6 +23,7 @@ impl ParserErrorInfo {
 
 #[derive(Debug)]
 pub enum ParserErrorKind {
+    Unknown,
     ExpectedCharacter { predicate_info: String },
     ExpectedToken { token: String },
     EndOfFile,
@@ -31,6 +32,7 @@ pub enum ParserErrorKind {
 impl fmt::Display for ParserErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self {
+            Self::Unknown => write!(f, "Unknown error"),
             Self::EndOfFile => write!(f, "End of input"),
             Self::ExpectedToken { token } => {
                 write!(f, "Expected token: {}", token)

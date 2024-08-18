@@ -157,6 +157,23 @@ pub fn parser_character_predicate(
     }
 }
 
+pub fn skip_whitespaces<ErrorType, OutputType, P>(
+    parser: P,
+) -> impl Fn(&ParserInput) -> Result<(ParserInput, OutputType), ErrorType>
+where
+    P: Parser<ParserInput, ErrorType, OutputType>,
+{
+    move |input| {
+        let (remaining_input, _) = repeat_at_least_0(parser_character_predicate(
+            char::is_whitespace,
+            "WHITESPACE",
+        ))
+        .run(input)
+        .unwrap();
+        parser.run(&remaining_input)
+    }
+}
+
 pub fn repeat_at_least_0<InputType: Clone, ErrorType, OutputType, P>(
     parser: P,
 ) -> impl Fn(&InputType) -> Result<(InputType, Vec<OutputType>), ()>
@@ -226,6 +243,46 @@ pub fn parser_token(
         }
         let end_pos = PositionInfo::from_parser_input_position(&remaining_input);
         Ok((remaining_input, pos.until(&end_pos)))
+    }
+}
+
+pub fn map_parser_error<InputType: Clone, ErrorType1, OutputType, ErrorType2, P, F>(
+    parser: P,
+    mapper_function: F,
+) -> impl Fn(&InputType) -> Result<(InputType, OutputType), ErrorType2>
+where
+    P: Parser<InputType, ErrorType1, OutputType>,
+    F: Fn(ErrorType1) -> ErrorType2,
+{
+    move |input| parser.run(input).map_err(&mapper_function)
+}
+
+pub fn and_then<InputType: Clone, ErrorType, OutputType1, OutputType2, P1, P2>(
+    parser1: P1,
+    parser2: P2,
+) -> impl Fn(&InputType) -> Result<(InputType, OutputType2), ErrorType>
+where
+    P1: Parser<InputType, ErrorType, OutputType1>,
+    P2: Parser<InputType, ErrorType, OutputType2>,
+{
+    move |input| {
+        let (remaining_input, _) = parser1.run(input)?;
+        parser2.run(&remaining_input)
+    }
+}
+
+pub fn and<InputType: Clone, ErrorType, OutputType1, OutputType2, P1, P2>(
+    parser1: P1,
+    parser2: P2,
+) -> impl Fn(&InputType) -> Result<(InputType, OutputType1), ErrorType>
+where
+    P1: Parser<InputType, ErrorType, OutputType1>,
+    P2: Parser<InputType, ErrorType, OutputType2>,
+{
+    move |input| {
+        let (remaining_input, parsed) = parser1.run(input)?;
+        parser2.run(&remaining_input)?;
+        Ok((remaining_input, parsed))
     }
 }
 
@@ -359,6 +416,77 @@ mod tests {
         {
             let input = ParserInput::create("char foo = '4';");
             assert_is_error_print_ok!(run_parser(parser_token("character".to_string()), &input));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_skip_whitespace() -> Result<(), ParserErrorInfo> {
+        {
+            let input = ParserInput::create("  \n\r\n15;");
+            let (rest, parsed) =
+                run_parser(skip_whitespaces(parser_token("15".to_string())), &input).unwrap();
+            assert_eq_position_info!(parsed, 5, 2, 0, 7, 2, 2);
+            assert_eq_parse_input!(rest, 7, 2, 2);
+        }
+        {
+            let input = ParserInput::create("double x;");
+            let (rest, parsed) =
+                run_parser(skip_whitespaces(parser_token("double".to_string())), &input).unwrap();
+            assert_eq_position_info!(parsed, 0, 0, 0, 6, 0, 6);
+            assert_eq_parse_input!(rest, 6, 0, 6);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_and_then() -> Result<(), ParserErrorInfo> {
+        {
+            let input = ParserInput::create("int x = 5;");
+
+            let parser = and_then(
+                skip_whitespaces(parser_token("int".to_string())),
+                skip_whitespaces(map_parser_error(
+                    repeat_at_least_1(parser_character_predicate(
+                        char::is_alphabetic,
+                        "ALPHABETIC",
+                    )),
+                    |_| ParserErrorInfo::create(ParserErrorKind::Unknown),
+                )),
+            );
+
+            let (rest, parsed) = run_parser(parser, &input).unwrap();
+            assert_eq!(parsed.into_iter().collect::<String>(), "x");
+            assert_eq_parse_input!(rest, 5, 0, 5);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_and() -> Result<(), ParserErrorInfo> {
+        {
+            let input = ParserInput::create("int x = 5;");
+
+            let parser = and(
+                skip_whitespaces(map_parser_error(
+                    repeat_at_least_1(parser_character_predicate(
+                        char::is_alphabetic,
+                        "ALPHABETIC",
+                    )),
+                    |_| ParserErrorInfo::create(ParserErrorKind::Unknown),
+                )),
+                skip_whitespaces(map_parser_error(
+                    repeat_at_least_1(parser_character_predicate(
+                        char::is_alphabetic,
+                        "ALPHABETIC",
+                    )),
+                    |_| ParserErrorInfo::create(ParserErrorKind::Unknown),
+                )),
+            );
+
+            let (rest, parsed) = run_parser(parser, &input).unwrap();
+            assert_eq!(parsed.into_iter().collect::<String>(), "int");
+            assert_eq_parse_input!(rest, 3, 0, 3);
         }
         Ok(())
     }
