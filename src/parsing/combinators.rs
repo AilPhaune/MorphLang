@@ -1,17 +1,47 @@
 use std::{char, rc::Rc};
 
-use super::error::{ParserErrorInfo, ParserErrorKind};
+use super::{
+    error::{ParserErrorInfo, ParserErrorKind},
+    parser::Parser,
+};
 
 #[macro_export]
 macro_rules! assert_eq_parse_input {
     ($parser_input:expr, $current_index:expr, $current_line:expr, $current_line_index:expr) => {
-        assert_eq!($parser_input.current_index, $current_index);
-        assert_eq!($parser_input.current_line, $current_line);
-        assert_eq!($parser_input.current_line_index, $current_line_index);
+        assert_eq!(
+            $parser_input.current_index, $current_index,
+            "Wrong current_index."
+        );
+        assert_eq!(
+            $parser_input.current_line, $current_line,
+            "Wrong current_line."
+        );
+        assert_eq!(
+            $parser_input.current_line_index, $current_line_index,
+            "Wrong current_line_index."
+        );
     };
 }
 
-#[derive(Debug)]
+#[macro_export]
+macro_rules! assert_eq_position_info {
+    ($pos_info: expr, $start_index: expr, $start_line: expr, $start_line_index: expr, $end_index: expr, $end_line: expr, $end_line_index: expr) => {
+        assert_eq!($pos_info.start_index, $start_index, "Wrong start_index.");
+        assert_eq!($pos_info.start_line, $start_line, "Wrong start_line.");
+        assert_eq!(
+            $pos_info.start_line_index, $start_line_index,
+            "Wrong start_line_index."
+        );
+        assert_eq!($pos_info.end_index, $end_index, "Wrong end_index.");
+        assert_eq!($pos_info.end_line, $end_line, "Wrong end_line.");
+        assert_eq!(
+            $pos_info.end_line_index, $end_line_index,
+            "Wrong end_line_index."
+        );
+    };
+}
+
+#[derive(Debug, Clone)]
 pub struct ParserInput {
     pub code: Rc<String>,
     pub current_index: usize,
@@ -33,8 +63,8 @@ impl ParserInput {
         self.code.chars().nth(self.current_index)
     }
 
-    pub fn get_char_relative(&self, idx: isize) -> Option<char> {
-        self.code.chars().nth(self.current_index + (idx as usize))
+    pub fn get_char_relative(&self, index: isize) -> Option<char> {
+        self.code.chars().nth(self.current_index + (index as usize))
     }
 
     pub fn advance(&self) -> Option<(char, ParserInput)> {
@@ -61,6 +91,51 @@ impl ParserInput {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct PositionInfo {
+    pub start_index: usize,
+    pub start_line: usize,
+    pub start_line_index: usize,
+    pub end_index: usize,
+    pub end_line: usize,
+    pub end_line_index: usize,
+}
+
+impl PositionInfo {
+    pub fn create(start_index: usize, start_line: usize, start_line_index: usize) -> Self {
+        Self {
+            start_index,
+            start_line,
+            start_line_index,
+            end_index: start_index,
+            end_line: start_line,
+            end_line_index: start_line,
+        }
+    }
+
+    pub fn from_parser_input_position(p: &ParserInput) -> Self {
+        Self {
+            start_index: p.current_index,
+            start_line: p.current_line,
+            start_line_index: p.current_line_index,
+            end_index: p.current_index,
+            end_line: p.current_line,
+            end_line_index: p.current_line_index,
+        }
+    }
+
+    pub fn until(&self, end: &Self) -> Self {
+        Self {
+            start_index: self.start_index,
+            start_line: self.start_line,
+            start_line_index: self.start_line_index,
+            end_index: end.end_index,
+            end_line: end.end_line,
+            end_line_index: end.end_line_index,
+        }
+    }
+}
+
 pub fn parser_character_predicate(
     predicate: fn(char) -> bool,
     predicate_info: &str,
@@ -79,6 +154,78 @@ pub fn parser_character_predicate(
                 ))
             }
         }
+    }
+}
+
+pub fn repeat_at_least_0<InputType: Clone, ErrorType, OutputType, P>(
+    parser: P,
+) -> impl Fn(&InputType) -> Result<(InputType, Vec<OutputType>), ()>
+where
+    P: Parser<InputType, ErrorType, OutputType>,
+{
+    move |input| {
+        let mut output: Vec<OutputType> = Vec::new();
+        let mut remaining_input: InputType = input.clone();
+        loop {
+            match parser.run(&remaining_input) {
+                Err(_) => {
+                    return Ok((remaining_input, output));
+                }
+                Ok((rest, value)) => {
+                    remaining_input = rest;
+                    output.push(value);
+                }
+            }
+        }
+    }
+}
+
+pub fn repeat_at_least_1<InputType: Clone, ErrorType, OutputType, P>(
+    parser: P,
+) -> impl Fn(&InputType) -> Result<(InputType, Vec<OutputType>), ()>
+where
+    P: Parser<InputType, ErrorType, OutputType>,
+{
+    move |input| {
+        let mut output: Vec<OutputType> = Vec::new();
+        let mut remaining_input: InputType = input.clone();
+        loop {
+            match parser.run(&remaining_input) {
+                Err(_) => {
+                    if output.is_empty() {
+                        return Err(());
+                    }
+                    return Ok((remaining_input, output));
+                }
+                Ok((rest, value)) => {
+                    remaining_input = rest;
+                    output.push(value);
+                }
+            }
+        }
+    }
+}
+
+pub fn parser_token(
+    token: String,
+) -> impl Fn(&ParserInput) -> Result<(ParserInput, PositionInfo), ParserErrorInfo> {
+    move |input| {
+        let pos = PositionInfo::from_parser_input_position(input);
+        let mut remaining_input = input.clone();
+        for c in token.chars() {
+            if let Some((ch, rest)) = remaining_input.advance() {
+                if ch != c {
+                    return Err(ParserErrorInfo::create(ParserErrorKind::ExpectedToken {
+                        token: token.clone(),
+                    }));
+                }
+                remaining_input = rest;
+            } else {
+                return Err(ParserErrorInfo::create(ParserErrorKind::EndOfFile));
+            }
+        }
+        let end_pos = PositionInfo::from_parser_input_position(&remaining_input);
+        Ok((remaining_input, pos.until(&end_pos)))
     }
 }
 
@@ -114,6 +261,104 @@ mod tests {
             )?;
             assert_eq!(parsed_char, '1');
             assert_eq_parse_input!(rest, 1, 0, 1);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_repeat_at_least_0() -> Result<(), ParserErrorInfo> {
+        {
+            let input = ParserInput::create("abcd012");
+            let (rest, parsed) = run_parser(
+                repeat_at_least_0(parser_character_predicate(
+                    char::is_alphabetic,
+                    "ALPHABETIC",
+                )),
+                &input,
+            )
+            .unwrap();
+            assert_eq!(parsed.into_iter().collect::<String>(), "abcd");
+            assert_eq_parse_input!(rest, 4, 0, 4);
+        }
+        {
+            let input = ParserInput::create("189ivkc");
+            let (rest, parsed) = run_parser(
+                repeat_at_least_0(parser_character_predicate(char::is_numeric, "NUMERIC")),
+                &input,
+            )
+            .unwrap();
+            assert_eq!(parsed.into_iter().collect::<String>(), "189");
+            assert_eq_parse_input!(rest, 3, 0, 3);
+        }
+        {
+            let input = ParserInput::create("ddsc993");
+            let (rest, parsed) = run_parser(
+                repeat_at_least_0(parser_character_predicate(char::is_numeric, "NUMERIC")),
+                &input,
+            )
+            .unwrap();
+            assert!(parsed.is_empty());
+            assert_eq_parse_input!(rest, 0, 0, 0);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_repeat_at_least_1() -> Result<(), ParserErrorInfo> {
+        {
+            let input = ParserInput::create("abcd012");
+            let (rest, parsed) = run_parser(
+                repeat_at_least_1(parser_character_predicate(
+                    char::is_alphabetic,
+                    "ALPHABETIC",
+                )),
+                &input,
+            )
+            .unwrap();
+            assert_eq!(parsed.into_iter().collect::<String>(), "abcd");
+            assert_eq_parse_input!(rest, 4, 0, 4);
+        }
+        {
+            let input = ParserInput::create("189ivkc");
+            let (rest, parsed) = run_parser(
+                repeat_at_least_1(parser_character_predicate(char::is_numeric, "NUMERIC")),
+                &input,
+            )
+            .unwrap();
+            assert_eq!(parsed.into_iter().collect::<String>(), "189");
+            assert_eq_parse_input!(rest, 3, 0, 3);
+        }
+        {
+            let input = ParserInput::create("ddsc993");
+            assert_is_error_print_ok!(run_parser(
+                repeat_at_least_1(parser_character_predicate(char::is_numeric, "NUMERIC")),
+                &input,
+            ));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_token() -> Result<(), ParserErrorInfo> {
+        {
+            let input = ParserInput::create("int foo = 4;");
+            let (rest, parsed) = run_parser(parser_token("int".to_string()), &input).unwrap();
+            assert_eq_position_info!(parsed, 0, 0, 0, 3, 0, 3);
+            assert_eq_parse_input!(rest, 3, 0, 3);
+        }
+        {
+            let input = ParserInput::create("int* foo = 4;");
+            let (rest1, parsed1) = run_parser(parser_token("int".to_string()), &input).unwrap();
+            assert_eq_position_info!(parsed1, 0, 0, 0, 3, 0, 3);
+            assert_eq_parse_input!(rest1, 3, 0, 3);
+
+            let (rest2, parsed2) = run_parser(parser_token("*".to_string()), &rest1).unwrap();
+            assert_eq_position_info!(parsed2, 3, 0, 3, 4, 0, 4);
+            assert_eq_parse_input!(rest2, 4, 0, 4);
+        }
+        {
+            let input = ParserInput::create("char foo = '4';");
+            assert_is_error_print_ok!(run_parser(parser_token("character".to_string()), &input));
         }
         Ok(())
     }
