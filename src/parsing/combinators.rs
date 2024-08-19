@@ -97,6 +97,10 @@ impl ParserInput {
             .collect::<String>()
     }
 
+    pub fn get_before(&self) -> PositionInfo {
+        PositionInfo::create(0, 0, 0).until(&PositionInfo::from_parser_input_position(self))
+    }
+
     pub fn len(&self) -> usize {
         let l = self.code.len();
         if self.current_index >= l {
@@ -153,6 +157,27 @@ impl PositionInfo {
             end_line: end.end_line,
             end_line_index: end.end_line_index,
         }
+    }
+
+    pub fn len(&self) -> usize {
+        if self.is_empty() {
+            0
+        } else {
+            self.end_index - self.start_index
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.end_index <= self.start_index
+    }
+
+    pub fn get_as_string(&self, parser_input: ParserInput) -> String {
+        parser_input
+            .code
+            .chars()
+            .skip(self.start_index)
+            .take(self.len())
+            .collect::<String>()
     }
 }
 
