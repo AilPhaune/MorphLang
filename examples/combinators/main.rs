@@ -233,8 +233,6 @@ fn update_display(
         *cursor_pos = input.len() as u16;
     }
 
-    *len_counter = 0;
-
     // ADD COMBINATORS HERE /!\
     write_combinator_output(parse_decimal_literal_int, input, "DEC int: ", len_counter)?;
 
@@ -274,9 +272,18 @@ where
 {
     let mut stdout = stdout();
 
+    if *len_counter < prefix.len() {
+        *len_counter = prefix.len()
+    };
+
     let input = ParserInput::create(input);
     write!(stdout, "{}", prefix)?;
-    *len_counter = prefix.len();
+    if *len_counter > prefix.len() {
+        let diff = *len_counter - prefix.len();
+        for _ in 0..diff {
+            write!(stdout, " ")?;
+        }
+    }
 
     match combinator.run(&input) {
         Err(_) => {
