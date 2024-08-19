@@ -7,15 +7,19 @@ use crossterm::{
     Result,
 };
 use morphlang::parsing::{
+    ast::{BinaryOperatorPrecedence, UnaryOperatorPrecedence},
     astparser::{
-        parse_bin_literal_int, parse_decimal_literal_int, parse_hex_literal_int, parse_literal_int,
-        parse_oct_literal_int,
+        parse_bin_literal_int, parse_decimal_literal_int, parse_expression, parse_hex_literal_int,
+        parse_literal_int, parse_oct_literal_int, ASTParserContext,
     },
     combinators::ParserInput,
     error::ParserErrorInfo,
     parser::Parser,
 };
-use std::io::{stdout, Write};
+use std::{
+    io::{stdout, Write},
+    rc::Rc,
+};
 
 fn main() -> Result<()> {
     let mut stdout = stdout();
@@ -29,7 +33,24 @@ fn main() -> Result<()> {
 
     let mut input = String::new();
     let mut cursor_pos: u16 = 0;
-    update_display(&input, &mut cursor_pos)?;
+    let mut len_counter: usize = 0;
+
+    let context = Rc::from(ASTParserContext::create(
+        vec![
+            BinaryOperatorPrecedence::RightAssociative(1000, "**".to_string()),
+            BinaryOperatorPrecedence::LeftAssociative(100, '+'.to_string()),
+            BinaryOperatorPrecedence::LeftAssociative(100, '-'.to_string()),
+            BinaryOperatorPrecedence::LeftAssociative(500, '*'.to_string()),
+            BinaryOperatorPrecedence::LeftAssociative(500, '/'.to_string()),
+        ],
+        vec![
+            UnaryOperatorPrecedence::create(100, "+".to_string()),
+            UnaryOperatorPrecedence::create(100, "-".to_string()),
+            UnaryOperatorPrecedence::create(100, "~".to_string()),
+        ],
+    ));
+
+    update_display(&input, &mut cursor_pos, &context, &mut len_counter)?;
 
     loop {
         if event::poll(std::time::Duration::from_millis(1))? {
@@ -42,6 +63,11 @@ fn main() -> Result<()> {
                         if (c == 'C' || c == 'c')
                             && key_event.modifiers.contains(KeyModifiers::CONTROL)
                         {
+                            execute!(
+                                stdout,
+                                cursor::MoveTo(0, 0),
+                                terminal::Clear(ClearType::All),
+                            )?;
                             break;
                         }
                         if !c.is_ascii() {
@@ -49,7 +75,7 @@ fn main() -> Result<()> {
                         }
                         input.insert(cursor_pos as usize, c);
                         cursor_pos += 1;
-                        update_display(&input, &mut cursor_pos)?;
+                        update_display(&input, &mut cursor_pos, &context, &mut len_counter)?;
                     }
                     KeyCode::Left => {
                         let mut last_char = '\0';
@@ -112,7 +138,7 @@ fn main() -> Result<()> {
                                 break;
                             }
                         }
-                        update_display(&input, &mut cursor_pos)?;
+                        update_display(&input, &mut cursor_pos, &context, &mut len_counter)?;
                     }
                     KeyCode::Delete => {
                         let mut last_char = '\0';
@@ -128,7 +154,10 @@ fn main() -> Result<()> {
                                 break;
                             }
                         }
-                        update_display(&input, &mut cursor_pos)?;
+                        update_display(&input, &mut cursor_pos, &context, &mut len_counter)?;
+                    }
+                    KeyCode::Enter => {
+                        print_ast(&input, &mut cursor_pos, &context, &mut len_counter)?;
                     }
                     _ => {}
                 }
@@ -154,37 +183,80 @@ fn is_same_type(c1: char, c2: char) -> bool {
     }
 }
 
-fn update_display(input: &str, cursor_pos: &mut u16) -> Result<()> {
+fn print_ast(
+    input: &str,
+    cursor_pos: &mut u16,
+    context: &Rc<ASTParserContext>,
+    len_counter: &mut usize,
+) -> Result<()> {
     let mut stdout = stdout();
 
-    execute!(stdout, cursor::MoveTo(0, 0),)?;
+    execute!(
+        stdout,
+        terminal::Clear(ClearType::All),
+        cursor::MoveToNextLine(1)
+    )?;
+
+    let pinput = ParserInput::create(input);
+    match parse_expression(context.clone()).run(&pinput) {
+        Err(e) => {
+            writeln!(stdout, "\nError while parsing:")?;
+            execute!(stdout, SetForegroundColor(Color::Red))?;
+            write!(stdout, "{:?}", e)
+        }
+        Ok((_, ast)) => {
+            writeln!(stdout, "\nAST:")?;
+            execute!(stdout, SetForegroundColor(Color::Green))?;
+            write!(stdout, "{:?}", ast)
+        }
+    }?;
+
+    execute!(stdout, ResetColor)?;
+
+    update_display(input, cursor_pos, context, len_counter)?;
+
+    stdout.flush()?;
+    Ok(())
+}
+
+fn update_display(
+    input: &str,
+    cursor_pos: &mut u16,
+    context: &Rc<ASTParserContext>,
+    len_counter: &mut usize,
+) -> Result<()> {
+    let mut stdout = stdout();
+
+    execute!(stdout, cursor::MoveTo(0, 0))?;
 
     if *cursor_pos as usize > input.len() {
         *cursor_pos = input.len() as u16;
     }
 
-    let mut len_counter: usize = 0;
+    *len_counter = 0;
 
     // ADD COMBINATORS HERE /!\
-    write_combinator_output(
-        parse_decimal_literal_int,
-        input,
-        "DEC int: ",
-        &mut len_counter,
-    )?;
-    write_combinator_output(parse_hex_literal_int, input, "HEX int: ", &mut len_counter)?;
-    write_combinator_output(parse_oct_literal_int, input, "OCT int: ", &mut len_counter)?;
-    write_combinator_output(parse_bin_literal_int, input, "BIN int: ", &mut len_counter)?;
-    write_combinator_output(parse_literal_int, input, "int lit: ", &mut len_counter)?;
+    write_combinator_output(parse_decimal_literal_int, input, "DEC int: ", len_counter)?;
 
-    for _ in 0..(len_counter - 1) {
+    write_combinator_output(parse_hex_literal_int, input, "HEX int: ", len_counter)?;
+    write_combinator_output(parse_oct_literal_int, input, "OCT int: ", len_counter)?;
+    write_combinator_output(parse_bin_literal_int, input, "BIN int: ", len_counter)?;
+    write_combinator_output(parse_literal_int, input, "int lit: ", len_counter)?;
+    write_combinator_output(
+        parse_expression(context.clone()),
+        input,
+        "expression: ",
+        len_counter,
+    )?;
+
+    for _ in 0..(*len_counter - 1) {
         write!(stdout, ">")?;
     }
     write!(stdout, " {}", input)?;
     execute!(
         stdout,
         terminal::Clear(ClearType::UntilNewLine),
-        cursor::MoveToColumn(len_counter as u16 + *cursor_pos)
+        cursor::MoveToColumn(*len_counter as u16 + *cursor_pos)
     )?;
 
     stdout.flush()?;

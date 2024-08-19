@@ -90,6 +90,20 @@ impl ParserInput {
         })
     }
 
+    pub fn advance_by(&self, count: usize) -> Option<(Vec<char>, ParserInput)> {
+        let mut advanced = Vec::new();
+        let mut state = self.clone();
+        for _ in 0..count {
+            if let Some((c, rest)) = state.advance() {
+                state = rest;
+                advanced.push(c);
+            } else {
+                return None;
+            }
+        }
+        Some((advanced, state))
+    }
+
     pub fn get_as_string(&self) -> String {
         self.code
             .chars()
@@ -206,7 +220,7 @@ pub fn parser_character_predicate(
     predicate_info: &str,
 ) -> impl Fn(&ParserInput) -> Result<(ParserInput, char), ParserErrorInfo> {
     let pred = predicate_info.to_string();
-    move |input: &ParserInput| match input.advance() {
+    move |input| match input.advance() {
         None => Err(ParserErrorInfo::create(ParserErrorKind::EndOfFile)),
         Some((ch, rest)) => {
             if predicate(ch) {
@@ -215,6 +229,26 @@ pub fn parser_character_predicate(
                 Err(ParserErrorInfo::create(
                     ParserErrorKind::ExpectedCharacter {
                         predicate_info: pred.clone(),
+                    },
+                ))
+            }
+        }
+    }
+}
+
+/// Parses one unique character, fails if it encounters a different character.
+pub fn parser_character(
+    c: char,
+) -> impl Fn(&ParserInput) -> Result<(ParserInput, char), ParserErrorInfo> {
+    move |input| match input.advance() {
+        None => Err(ParserErrorInfo::create(ParserErrorKind::EndOfFile)),
+        Some((ch, rest)) => {
+            if ch == c {
+                Ok((rest, c))
+            } else {
+                Err(ParserErrorInfo::create(
+                    ParserErrorKind::ExpectedCharacter {
+                        predicate_info: c.to_string(),
                     },
                 ))
             }
@@ -524,12 +558,12 @@ where
 ///
 /// Example 1: Success case
 /// ```
-/// use crate::morphlang::parsing::combinators::{and_then, parser_token, skip_whitespaces, ParserInput};
+/// use crate::morphlang::parsing::combinators::{and_then2, parser_token, skip_whitespaces, ParserInput};
 /// use crate::morphlang::parsing::parser::Parser;
 /// use crate::morphlang::assert_eq_position_info;
 ///
 /// let input = ParserInput::create("your input");
-/// let parser = and_then(
+/// let parser = and_then2(
 ///     parser_token("your".to_string()),
 ///     skip_whitespaces(parser_token("input".to_string()))
 /// );
@@ -545,11 +579,11 @@ where
 ///
 /// Example 2: Fail case
 /// ```
-/// use crate::morphlang::parsing::combinators::{and_then, parser_token, skip_whitespaces, ParserInput};
+/// use crate::morphlang::parsing::combinators::{and_then2, parser_token, skip_whitespaces, ParserInput};
 /// use crate::morphlang::parsing::parser::Parser;
 ///
 /// let input = ParserInput::create("your different input");
-/// let parser = and_then(
+/// let parser = and_then2(
 ///     parser_token("your".to_string()),
 ///     skip_whitespaces(parser_token("input".to_string()))
 /// );
@@ -561,7 +595,7 @@ where
 ///     Ok(v) => panic!("Parser was supposed to fail, got Ok({:?})", v),
 /// }
 /// ```
-pub fn and_then<InputType: Clone, ErrorType, OutputType1, OutputType2, P1, P2>(
+pub fn and_then2<InputType: Clone, ErrorType, OutputType1, OutputType2, P1, P2>(
     parser1: P1,
     parser2: P2,
 ) -> impl Fn(&InputType) -> Result<(InputType, OutputType2), ErrorType>
@@ -576,6 +610,64 @@ where
 }
 
 /// Matches parser1 then parser2, and returns only the result of parser 1
+///
+/// # Examples
+///
+/// Example 1: Success case
+/// ```
+/// use crate::morphlang::parsing::combinators::{and_then1, parser_token, skip_whitespaces, ParserInput};
+/// use crate::morphlang::parsing::parser::Parser;
+/// use crate::morphlang::assert_eq_position_info;
+///
+/// let input = ParserInput::create("your input");
+/// let parser = and_then1(
+///     parser_token("your".to_string()),
+///     skip_whitespaces(parser_token("input".to_string()))
+/// );
+///
+/// match parser.run(&input) {
+///     Err(e) => panic!("Parser wasn't supposed to fail !"),
+///     Ok((remaining_input, parsed)) => {
+///         assert_eq_position_info!(parsed, 0, 0, 0, 4, 0, 4);
+///         assert!(remaining_input.is_empty());
+///     },
+/// }
+/// ```
+///
+/// Example 2: Fail case
+/// ```
+/// use crate::morphlang::parsing::combinators::{and_then1, parser_token, skip_whitespaces, ParserInput};
+/// use crate::morphlang::parsing::parser::Parser;
+///
+/// let input = ParserInput::create("your different input");
+/// let parser = and_then1(
+///     parser_token("your".to_string()),
+///     skip_whitespaces(parser_token("input".to_string()))
+/// );
+///
+/// match parser.run(&input) {
+///     Err(e) => {
+///         println!("Parser failed with error {:?}, which was intended !", e)    
+///     },
+///     Ok(v) => panic!("Parser was supposed to fail, got Ok({:?})", v),
+/// }
+/// ```
+pub fn and_then1<InputType: Clone, ErrorType, OutputType1, OutputType2, P1, P2>(
+    parser1: P1,
+    parser2: P2,
+) -> impl Fn(&InputType) -> Result<(InputType, OutputType1), ErrorType>
+where
+    P1: Parser<InputType, ErrorType, OutputType1>,
+    P2: Parser<InputType, ErrorType, OutputType2>,
+{
+    move |input| {
+        let (remaining_input, parsed) = parser1.run(input)?;
+        let (remaining_input, _) = parser2.run(&remaining_input)?;
+        Ok((remaining_input, parsed))
+    }
+}
+
+/// Matches parser1 then parser2, and returns only the result of parser 1 and ignores the input consumed by parser 2
 ///
 /// # Examples
 ///
@@ -717,6 +809,22 @@ where
     }
 }
 
+/// Same as `any_of`, but with a vec of `Box`es
+pub fn any_of_boxes<InputType: Clone, ErrorType, OutputType>(
+    parsers: Vec<Box<dyn Parser<InputType, ErrorType, OutputType>>>,
+) -> impl Fn(&InputType) -> Result<(InputType, OutputType), Vec<ErrorType>> {
+    move |input| {
+        let mut errs: Vec<ErrorType> = Vec::new();
+        for parser in parsers.iter() {
+            match parser.run(input) {
+                Err(e) => errs.push(e),
+                Ok(v) => return Ok(v),
+            }
+        }
+        Err(errs)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{assert_is_error_print_ok, parsing::parser::run_parser};
@@ -724,7 +832,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_char_predicate() -> Result<(), ParserErrorInfo> {
+    fn test_character_predicate() -> Result<(), ParserErrorInfo> {
         {
             let input = ParserInput::create("abc");
             let (rest, parsed_char) = run_parser(
@@ -749,6 +857,21 @@ mod tests {
             )?;
             assert_eq!(parsed_char, '1');
             assert_eq_parse_input!(rest, 1, 0, 1);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_character() -> Result<(), ParserErrorInfo> {
+        {
+            let input = ParserInput::create("abc");
+            let (rest, parsed_char) = run_parser(parser_character('a'), &input)?;
+            assert_eq!(parsed_char, 'a');
+            assert_eq_parse_input!(rest, 1, 0, 1);
+        }
+        {
+            let input = ParserInput::create("abc");
+            assert_is_error_print_ok!(run_parser(parser_character('b'), &input));
         }
         Ok(())
     }
@@ -827,7 +950,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_token() -> Result<(), ParserErrorInfo> {
+    fn test_token() -> Result<(), ParserErrorInfo> {
         {
             let input = ParserInput::create("int foo = 4;");
             let (rest, parsed) = run_parser(parser_token("int".to_string()), &input).unwrap();
@@ -852,7 +975,7 @@ mod tests {
     }
 
     #[test]
-    fn test_skip_whitespace() -> Result<(), ParserErrorInfo> {
+    fn test_skip_whitespaces() -> Result<(), ParserErrorInfo> {
         {
             let input = ParserInput::create("  \n\r\n15;");
             let (rest, parsed) =
@@ -871,11 +994,11 @@ mod tests {
     }
 
     #[test]
-    fn test_and_then() -> Result<(), ParserErrorInfo> {
+    fn test_and_then2() -> Result<(), ParserErrorInfo> {
         {
             let input = ParserInput::create("int x = 5;");
 
-            let parser = and_then(
+            let parser = and_then2(
                 skip_whitespaces(parser_token("int".to_string())),
                 skip_whitespaces(map_parser_error(
                     repeat_at_least_1(parser_character_predicate(
@@ -888,6 +1011,29 @@ mod tests {
 
             let (rest, parsed) = run_parser(parser, &input).unwrap();
             assert_eq!(parsed.into_iter().collect::<String>(), "x");
+            assert_eq_parse_input!(rest, 5, 0, 5);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_and_then1() -> Result<(), ParserErrorInfo> {
+        {
+            let input = ParserInput::create("int x = 5;");
+
+            let parser = and_then1(
+                skip_whitespaces(parser_token("int".to_string())),
+                skip_whitespaces(map_parser_error(
+                    repeat_at_least_1(parser_character_predicate(
+                        char::is_alphabetic,
+                        "ALPHABETIC",
+                    )),
+                    |_| ParserErrorInfo::create(ParserErrorKind::Unknown),
+                )),
+            );
+
+            let (rest, parsed) = run_parser(parser, &input).unwrap();
+            assert_eq_position_info!(parsed, 0, 0, 0, 3, 0, 3);
             assert_eq_parse_input!(rest, 5, 0, 5);
         }
         Ok(())
@@ -922,6 +1068,41 @@ mod tests {
         Ok(())
     }
 
+    fn test_template_or0<P, ErrorType: std::fmt::Debug>(parser: P) -> Result<(), ErrorType>
+    where
+        P: Parser<ParserInput, ErrorType, PositionInfo>,
+    {
+        {
+            let input = ParserInput::create("int x = 5;");
+            let (rest, parsed) = parser.run(&input)?;
+            assert_eq_position_info!(parsed, 0, 0, 0, 3, 0, 3);
+            assert_eq_parse_input!(rest, 3, 0, 3);
+        }
+        {
+            let input = ParserInput::create("void foo() {}");
+            let (rest, parsed) = parser.run(&input)?;
+            assert_eq_position_info!(parsed, 0, 0, 0, 4, 0, 4);
+            assert_eq_parse_input!(rest, 4, 0, 4);
+        }
+        {
+            let input = ParserInput::create("float x = 5.2f;");
+            let (rest, parsed) = parser.run(&input)?;
+            assert_eq_position_info!(parsed, 0, 0, 0, 5, 0, 5);
+            assert_eq_parse_input!(rest, 5, 0, 5);
+        }
+        {
+            let input = ParserInput::create("double x = 5.2;");
+            let (rest, parsed) = parser.run(&input)?;
+            assert_eq_position_info!(parsed, 0, 0, 0, 6, 0, 6);
+            assert_eq_parse_input!(rest, 6, 0, 6);
+        }
+        {
+            let input = ParserInput::create("long x = 7;");
+            assert_is_error_print_ok!(parser.run(&input));
+        }
+        Ok(())
+    }
+
     #[test]
     fn test_or() -> Result<(), ParserErrorInfo> {
         let parser = or(
@@ -934,39 +1115,12 @@ mod tests {
                 parser_token("double".to_string()),
             ),
         );
-        {
-            let input = ParserInput::create("int x = 5;");
-            let (rest, parsed) = run_parser(&parser, &input).unwrap();
-            assert_eq_position_info!(parsed, 0, 0, 0, 3, 0, 3);
-            assert_eq_parse_input!(rest, 3, 0, 3);
-        }
-        {
-            let input = ParserInput::create("void foo() {}");
-            let (rest, parsed) = run_parser(&parser, &input).unwrap();
-            assert_eq_position_info!(parsed, 0, 0, 0, 4, 0, 4);
-            assert_eq_parse_input!(rest, 4, 0, 4);
-        }
-        {
-            let input = ParserInput::create("float x = 5.2f;");
-            let (rest, parsed) = run_parser(&parser, &input).unwrap();
-            assert_eq_position_info!(parsed, 0, 0, 0, 5, 0, 5);
-            assert_eq_parse_input!(rest, 5, 0, 5);
-        }
-        {
-            let input = ParserInput::create("double x = 5.2;");
-            let (rest, parsed) = run_parser(&parser, &input).unwrap();
-            assert_eq_position_info!(parsed, 0, 0, 0, 6, 0, 6);
-            assert_eq_parse_input!(rest, 6, 0, 6);
-        }
-        {
-            let input = ParserInput::create("long x = 7;");
-            assert_is_error_print_ok!(run_parser(&parser, &input));
-        }
+        test_template_or0(parser).map_err(|_| ParserErrorInfo::create(ParserErrorKind::Unknown))?;
         Ok(())
     }
 
     #[test]
-    fn test_not() {
+    fn test_not() -> Result<(), ParserErrorInfo> {
         let parser_letters = repeat_at_least_1(parser_character_predicate(
             char::is_alphabetic,
             "ALPHABETIC",
@@ -1015,5 +1169,91 @@ mod tests {
                 }
             }
         }
+        Ok(())
+    }
+
+    #[test]
+    fn test_map_parser_error() -> Result<(), ParserErrorInfo> {
+        {
+            let input = ParserInput::create("abcd");
+            let parser = repeat_at_least_1(parser_character_predicate(char::is_numeric, "NUMERIC"));
+            let mapped_parser = map_parser_error(parser, |_| "mapped error");
+            match run_parser(&mapped_parser, &input) {
+                Ok(v) => panic!("Expected parser to fail, got Ok({:?}).", v),
+                Err(e) => assert_eq!(e, "mapped error"),
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_map_parser_output() -> Result<(), ParserErrorInfo> {
+        {
+            let input = ParserInput::create("abcd");
+            let parser = repeat_at_least_1(parser_character_predicate(
+                char::is_alphabetic,
+                "ALPHABETIC",
+            ));
+            let mapped_parser = map_parser_output(parser, |v| {
+                v.iter().collect::<String>().to_ascii_uppercase()
+            });
+            let (remaining_input, parsed) = run_parser(&mapped_parser, &input).unwrap();
+            assert_eq!(parsed, "ABCD");
+            assert!(remaining_input.is_empty());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_map_parser() -> Result<(), ParserErrorInfo> {
+        let parser = repeat_at_least_1(parser_character_predicate(
+            char::is_alphabetic,
+            "ALPHABETIC",
+        ));
+        let mapped_parser = map_parser(
+            parser,
+            |v| v.iter().collect::<String>().to_ascii_uppercase(),
+            |_| "mapped error",
+        );
+        {
+            let input = ParserInput::create("abcd");
+            let (remaining_input, parsed) = run_parser(&mapped_parser, &input).unwrap();
+            assert_eq!(parsed, "ABCD");
+            assert!(remaining_input.is_empty());
+        }
+        {
+            let input = ParserInput::create("1234");
+            match run_parser(&mapped_parser, &input) {
+                Ok(v) => panic!("Expected parser to fail, got Ok({:?}).", v),
+                Err(e) => assert_eq!(e, "mapped error"),
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_any_of() -> Result<(), ParserErrorInfo> {
+        let parser = any_of(vec![
+            parser_token("int".to_string()),
+            parser_token("float".to_string()),
+            parser_token("void".to_string()),
+            parser_token("double".to_string()),
+        ]);
+        test_template_or0(parser)
+            .map_err(|e| ParserErrorInfo::create(ParserErrorKind::SubErrorList(e)))?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_any_of_boxes() -> Result<(), ParserErrorInfo> {
+        let parser = any_of_boxes(vec![
+            Box::from(parser_token("int".to_string())),
+            Box::from(parser_token("float".to_string())),
+            Box::from(parser_token("void".to_string())),
+            Box::from(parser_token("double".to_string())),
+        ]);
+        test_template_or0(parser)
+            .map_err(|e| ParserErrorInfo::create(ParserErrorKind::SubErrorList(e)))?;
+        Ok(())
     }
 }
