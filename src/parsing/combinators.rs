@@ -89,6 +89,26 @@ impl ParserInput {
             )
         })
     }
+
+    pub fn get_as_string(&self) -> String {
+        self.code
+            .chars()
+            .skip(self.current_index)
+            .collect::<String>()
+    }
+
+    pub fn len(&self) -> usize {
+        let l = self.code.len();
+        if self.current_index >= l {
+            0
+        } else {
+            l - self.current_index
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.current_index >= self.code.len()
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -136,6 +156,26 @@ impl PositionInfo {
     }
 }
 
+/// Parses a character based on a predicate. Returns the character if it matches the predicate, or a `ParserErrorInfo` of the kind `ParserErrorKind::ExpectedCharacter`. <br>
+/// The `predicate_info` field allows the error to carry more information about what kind of character was expected.
+///
+/// # Examples
+///
+/// Example 1: Parsing an alphanumeric character
+/// ```
+/// use crate::morphlang::parsing::combinators::{parser_character_predicate, ParserInput};
+/// use crate::morphlang::parsing::parser::Parser;
+///
+/// let input = ParserInput::create("your input");
+/// let parser = parser_character_predicate(char::is_alphanumeric, "ALPHANUMERIC");
+/// match parser.run(&input) {
+///     Err(e) => panic!("Parser wasn't supposed to fail, as the first character 'y' is alphanumeric !"),
+///     Ok((remaining_input, parsed)) => {
+///         assert_eq!(parsed, 'y');
+///         assert_eq!(remaining_input.get_as_string(), "our input");
+///     },
+/// }
+/// ```
 pub fn parser_character_predicate(
     predicate: fn(char) -> bool,
     predicate_info: &str,
@@ -157,6 +197,26 @@ pub fn parser_character_predicate(
     }
 }
 
+/// Used to wrap another parser so it allows the input to start with whitespaces.<br>
+/// It returns the output of the wrapped parser after having skipped the whitespaces at the start of the input.
+///
+/// # Examples
+///
+/// Example 1: Parsing a token, skipping the whitespaces before that token
+/// ```
+/// use crate::morphlang::parsing::combinators::{skip_whitespaces, parser_token, ParserInput};
+/// use crate::morphlang::parsing::parser::Parser;
+///
+/// let input = ParserInput::create(" \r  \n\n\t  \t\r\nyour input");
+/// let parser = skip_whitespaces(parser_token("your".to_string()));
+/// match parser.run(&input) {
+///     Err(e) => panic!("Parser wasn't supposed to fail !"),
+///     Ok((remaining_input, parsed)) => {
+///         // here, `parsed` is a `PositionInfo`
+///         assert_eq!(remaining_input.get_as_string(), " input");
+///     },
+/// }
+/// ```
 pub fn skip_whitespaces<ErrorType, OutputType, P>(
     parser: P,
 ) -> impl Fn(&ParserInput) -> Result<(ParserInput, OutputType), ErrorType>
@@ -174,6 +234,40 @@ where
     }
 }
 
+/// Returns a parser that repeatedly parses using the given parser, returning a `Vec` containing all the successful parses, and stops when the given parser fails.<br>
+/// The returned parser never fails.<br>
+///
+/// # Examples
+///
+/// Example 1: Parsing at least 0 alphabetic characters
+/// ```
+/// use crate::morphlang::parsing::combinators::{repeat_at_least_0, parser_character_predicate, ParserInput};
+/// use crate::morphlang::parsing::parser::Parser;
+///
+/// let input = ParserInput::create("your input");
+/// let parser = repeat_at_least_0(parser_character_predicate(char::is_alphabetic, "ALPHABETIC"));
+/// match parser.run(&input) {
+///     Err(e) => panic!("Parser wasn't supposed to fail !"),
+///     Ok((remaining_input, parsed)) => {
+///         assert_eq!(parsed.iter().collect::<String>(), "your");
+///     },
+/// }
+/// ```
+///
+/// Example 2: Parsing at least 0 numeric characters
+/// ```
+/// use crate::morphlang::parsing::combinators::{repeat_at_least_0, parser_character_predicate, ParserInput};
+/// use crate::morphlang::parsing::parser::Parser;
+///
+/// let input = ParserInput::create("your input");
+/// let parser = repeat_at_least_0(parser_character_predicate(char::is_numeric, "NUMERIC"));
+/// match parser.run(&input) {
+///     Err(e) => panic!("Parser wasn't supposed to fail !"),
+///     Ok((remaining_input, parsed)) => {
+///         assert!(parsed.is_empty()); // Parses nothing
+///     },
+/// }
+/// ```
 pub fn repeat_at_least_0<InputType: Clone, ErrorType, OutputType, P>(
     parser: P,
 ) -> impl Fn(&InputType) -> Result<(InputType, Vec<OutputType>), ()>
@@ -197,6 +291,40 @@ where
     }
 }
 
+/// Returns a parser that repeatedly parses using the given parser, returning a `Vec` containing all the successful parses, and stops when the given parser fails.<br>
+/// The returned parser fails if and only if the underlying parser fails on its first call, i.e. when the output vector is empty. In that case, it returns a unit error type.
+///
+/// # Examples
+///
+/// Example 1: Parsing a sequence of alphabetic characters
+/// ```
+/// use crate::morphlang::parsing::combinators::{repeat_at_least_1, parser_character_predicate, ParserInput};
+/// use crate::morphlang::parsing::parser::Parser;
+///
+/// let input = ParserInput::create("your input");
+/// let parser = repeat_at_least_1(parser_character_predicate(char::is_alphabetic, "ALPHABETIC"));
+/// match parser.run(&input) {
+///     Err(e) => panic!("Parser wasn't supposed to fail !"),
+///     Ok((remaining_input, parsed)) => {
+///         assert_eq!(parsed.iter().collect::<String>(), "your");
+///     },
+/// }
+/// ```
+///
+/// Example 2: Parsing a sequence of numeric characters
+/// ```
+/// use crate::morphlang::parsing::combinators::{repeat_at_least_1, parser_character_predicate, ParserInput};
+/// use crate::morphlang::parsing::parser::Parser;
+///
+/// let input = ParserInput::create("your input");
+/// let parser = repeat_at_least_1(parser_character_predicate(char::is_numeric, "NUMERIC"));
+/// match parser.run(&input) {
+///     Err(e) => {
+///         println!("Parser failed with error {:?} which was intended !", e);
+///     },
+///     Ok(v) => panic!("Parser was supposed to fail, got Ok({:?})", v),
+/// }
+/// ```
 pub fn repeat_at_least_1<InputType: Clone, ErrorType, OutputType, P>(
     parser: P,
 ) -> impl Fn(&InputType) -> Result<(InputType, Vec<OutputType>), ()>
@@ -223,6 +351,41 @@ where
     }
 }
 
+/// Parses an exact sequence of characters
+///
+/// # Examples
+///
+/// Example 1: Fail case
+/// ```
+/// use crate::morphlang::parsing::combinators::{parser_token, ParserInput};
+/// use crate::morphlang::parsing::parser::Parser;
+///
+/// let input = ParserInput::create("yourinput");
+/// let parser = parser_token("your ".to_string());
+/// match parser.run(&input) {
+///     Err(e) => {
+///         println!("Parser failed with error {:?} which was intended !", e);
+///     },
+///     Ok(v) => panic!("Parser was supposed to fail, got Ok({:?})", v),
+/// }
+/// ```
+///
+/// Example 2: Success case
+/// ```
+/// use crate::morphlang::parsing::combinators::{parser_token, ParserInput};
+/// use crate::morphlang::parsing::parser::Parser;
+/// use crate::morphlang::assert_eq_position_info;
+///
+/// let input = ParserInput::create("yourinput");
+/// let parser = parser_token("your".to_string());
+/// match parser.run(&input) {
+///     Err(e) => panic!("Parser wasn't supposed to fail !"),
+///     Ok((remaining_input, parsed)) => {
+///         assert_eq_position_info!(parsed, 0, 0, 0, 4, 0, 4);
+///         assert_eq!(remaining_input.get_as_string(), "input");
+///     },
+/// }
+/// ```
 pub fn parser_token(
     token: String,
 ) -> impl Fn(&ParserInput) -> Result<(ParserInput, PositionInfo), ParserErrorInfo> {
@@ -246,6 +409,24 @@ pub fn parser_token(
     }
 }
 
+/// Returns the same parser as the one given, but allows to map its potential error output to another type, using the mapper_function
+///
+/// # Examples
+///
+/// Example 1:
+/// ```
+/// use crate::morphlang::parsing::combinators::{map_parser_error, parser_character_predicate, repeat_at_least_1, ParserInput};
+/// use crate::morphlang::parsing::parser::Parser;
+///
+/// let input = ParserInput::create("your input");
+/// let parser = repeat_at_least_1(parser_character_predicate(char::is_numeric, "NUMERIC")); // This parser return a unit error type when it fails
+/// let mapped_parser = map_parser_error(parser, |_| "Could not find a numeric char".to_string());
+///
+/// match mapped_parser.run(&input) {
+///     Err(e) => assert_eq!(e, "Could not find a numeric char"),
+///     Ok(v) => panic!("Parser was supposed to fail, got Ok({:?})", v),
+/// }
+/// ```
 pub fn map_parser_error<InputType: Clone, ErrorType1, OutputType, ErrorType2, P, F>(
     parser: P,
     mapper_function: F,
@@ -257,6 +438,49 @@ where
     move |input| parser.run(input).map_err(&mapper_function)
 }
 
+/// Matches parser1 then parser2, and returns only the result of parser 2
+///
+/// # Examples
+///
+/// Example 1: Success case
+/// ```
+/// use crate::morphlang::parsing::combinators::{and_then, parser_token, skip_whitespaces, ParserInput};
+/// use crate::morphlang::parsing::parser::Parser;
+/// use crate::morphlang::assert_eq_position_info;
+///
+/// let input = ParserInput::create("your input");
+/// let parser = and_then(
+///     parser_token("your".to_string()),
+///     skip_whitespaces(parser_token("input".to_string()))
+/// );
+///
+/// match parser.run(&input) {
+///     Err(e) => panic!("Parser wasn't supposed to fail !"),
+///     Ok((remaining_input, parsed)) => {
+///         assert_eq_position_info!(parsed, 5, 0, 5, 10, 0, 10);
+///         assert!(remaining_input.is_empty());
+///     },
+/// }
+/// ```
+///
+/// Example 2: Fail case
+/// ```
+/// use crate::morphlang::parsing::combinators::{and_then, parser_token, skip_whitespaces, ParserInput};
+/// use crate::morphlang::parsing::parser::Parser;
+///
+/// let input = ParserInput::create("your different input");
+/// let parser = and_then(
+///     parser_token("your".to_string()),
+///     skip_whitespaces(parser_token("input".to_string()))
+/// );
+///
+/// match parser.run(&input) {
+///     Err(e) => {
+///         println!("Parser failed with error {:?}, which was intended !", e)    
+///     },
+///     Ok(v) => panic!("Parser was supposed to fail, got Ok({:?})", v),
+/// }
+/// ```
 pub fn and_then<InputType: Clone, ErrorType, OutputType1, OutputType2, P1, P2>(
     parser1: P1,
     parser2: P2,
@@ -271,6 +495,7 @@ where
     }
 }
 
+/// Matches parser1 then parser2, and returns only the result of parser 1
 pub fn and<InputType: Clone, ErrorType, OutputType1, OutputType2, P1, P2>(
     parser1: P1,
     parser2: P2,
@@ -286,6 +511,49 @@ where
     }
 }
 
+/// Matches parser1 OR parser2, and returns the result of the first one that succeeds, or both errors if both fail
+///
+/// # Examples
+///
+/// Example 1: Success case
+/// ```
+/// use crate::morphlang::parsing::combinators::{and, parser_token, skip_whitespaces, ParserInput};
+/// use crate::morphlang::parsing::parser::Parser;
+/// use crate::morphlang::assert_eq_position_info;
+///
+/// let input = ParserInput::create("your input");
+/// let parser = and(
+///     parser_token("your".to_string()),
+///     skip_whitespaces(parser_token("input".to_string()))
+/// );
+///
+/// match parser.run(&input) {
+///     Err(e) => panic!("Parser wasn't supposed to fail !"),
+///     Ok((remaining_input, parsed)) => {
+///         assert_eq_position_info!(parsed, 0, 0, 0, 4, 0, 4);
+///         assert_eq!(remaining_input.get_as_string(), " input");
+///     },
+/// }
+/// ```
+///
+/// Example 2: Fail case
+/// ```
+/// use crate::morphlang::parsing::combinators::{and, parser_token, skip_whitespaces, ParserInput};
+/// use crate::morphlang::parsing::parser::Parser;
+///
+/// let input = ParserInput::create("your different input");
+/// let parser = and(
+///     parser_token("your".to_string()),
+///     skip_whitespaces(parser_token("input".to_string()))
+/// );
+///
+/// match parser.run(&input) {
+///     Err(e) => {
+///         println!("Parser failed with error {:?}, which was intended !", e)
+///     },
+///     Ok(v) => panic!("Parser was supposed to fail, got Ok({:?})", v),
+/// }
+/// ```
 pub fn or<InputType: Clone, ErrorType1, ErrorType2, OutputType, P1, P2>(
     parser1: P1,
     parser2: P2,
@@ -303,14 +571,49 @@ where
     }
 }
 
+/// Returns a unit type error if the parser succeeds, or returns a unit output type with the parser input unchanged if the parser fails
+///
+/// # Examples
+///
+/// Example 1: Success case
+/// ```
+/// use crate::morphlang::parsing::combinators::{not, parser_token, ParserInput};
+/// use crate::morphlang::parsing::parser::Parser;
+///
+/// let input = ParserInput::create("your input");
+/// let parser = not(parser_token("youri".to_string()));
+///
+/// match parser.run(&input) {
+///     Err(e) => panic!("Parser wasn't supposed to fail !"),
+///     Ok((remaining_input, _)) => {
+///         assert_eq!(remaining_input.get_as_string(), "your input");
+///     },
+/// }
+/// ```
+///
+/// Example 2: Fail case
+/// ```
+/// use crate::morphlang::parsing::combinators::{not, parser_token, ParserInput};
+/// use crate::morphlang::parsing::parser::Parser;
+///
+/// let input = ParserInput::create("your input");
+/// let parser = not(parser_token("your".to_string()));
+///
+/// match parser.run(&input) {
+///     Err(e) => {
+///         println!("Parser failed with error {:?}, which was intended !", e)
+///     },
+///     Ok(v) => panic!("Parser was supposed to fail, got Ok({:?})", v),
+/// }
+/// ```
 pub fn not<InputType: Clone, ErrorType, OutputType, P>(
     parser: P,
-) -> impl Fn(&InputType) -> Result<(InputType, ()), Option<ErrorType>>
+) -> impl Fn(&InputType) -> Result<(InputType, ()), ()>
 where
     P: Parser<InputType, ErrorType, OutputType>,
 {
     move |input| match parser.run(input) {
-        Ok(_) => Err(None),
+        Ok(_) => Err(()),
         Err(_) => Ok((input.clone(), ())),
     }
 }
@@ -575,10 +878,9 @@ mod tests {
                 ParserErrorInfo::create(ParserErrorKind::Unknown)
                     .with_info("Parser of a string of letters failed because it didn't find a letter to start the string".to_string())
             }),
-            map_parser_error(parser_not_digit, |e| match e {
-                None => ParserErrorInfo::create(ParserErrorKind::Unknown)
-                    .with_info("Parser of a non-digit failed because it found a digit".to_string()),
-                Some(err) => err,
+            map_parser_error(parser_not_digit, |_| {
+                ParserErrorInfo::create(ParserErrorKind::Unknown)
+                    .with_info("Parser of a non-digit failed because it found a digit".to_string())
             }),
         ); // a parser for a string of letters that does not end in a digit, only getting the letter string part
         {
