@@ -4,7 +4,8 @@ use super::{
     ast::{BinaryOperatorPrecedence, Expression, ExpressionKind, UnaryOperatorPrecedence},
     combinators::{
         and, and_then1, and_then2, any_of, any_of_boxes, map_parser, map_parser_error, not,
-        parser_character, parser_character_predicate, parser_token, repeat_at_least_1, ParserInput,
+        parser_character, parser_character_predicate, parser_nothing, parser_token,
+        repeat_at_least_1, skip_whitespaces, ParserInput,
     },
     error::{ParserErrorInfo, ParserErrorKind},
     parser::{run_parser, Parser},
@@ -238,7 +239,11 @@ fn parse_expression_internal(
     context: &Rc<ASTParserContext>,
     min_precedence: u64,
 ) -> Result<(ParserInput, Expression), ParserErrorInfo> {
-    let (mut input, mut lhs) = parse_primary(context.clone()).run(input)?;
+    let (mut input, mut lhs) = and_then1(
+        skip_whitespaces(parse_primary(context.clone())),
+        skip_whitespaces(parser_nothing()),
+    )
+    .run(input)?;
 
     loop {
         let mut found_op = None;

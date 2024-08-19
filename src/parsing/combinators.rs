@@ -825,6 +825,11 @@ pub fn any_of_boxes<InputType: Clone, ErrorType, OutputType>(
     }
 }
 
+pub fn parser_nothing<InputType: Clone, ErrorType>(
+) -> impl Fn(&InputType) -> Result<(InputType, ()), ErrorType> {
+    move |input| Ok((input.clone(), ()))
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{assert_is_error_print_ok, parsing::parser::run_parser};
