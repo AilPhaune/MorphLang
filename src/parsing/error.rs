@@ -1,5 +1,7 @@
 use core::fmt;
 
+use super::ast::ExpressionKind;
+
 #[derive(Debug, Clone)]
 pub struct ParserErrorInfo {
     kind: ParserErrorKind,
@@ -46,6 +48,8 @@ pub enum ParserErrorKind {
     ExpectedCharacter { predicate_info: String },
     ExpectedToken { token: String },
     EndOfFile,
+    ExpectedExpressionKind(ExpressionKind),
+    SubErrorList(Vec<ParserErrorInfo>),
 }
 
 impl fmt::Display for ParserErrorKind {
@@ -58,6 +62,12 @@ impl fmt::Display for ParserErrorKind {
             }
             Self::ExpectedCharacter { predicate_info } => {
                 write!(f, "Expected character of predicate {}", predicate_info)
+            }
+            Self::ExpectedExpressionKind(kind) => {
+                write!(f, "Expected expression kind {}", kind)
+            }
+            Self::SubErrorList(sub_errs) => {
+                write!(f, "Error caused by one of the sub-errors: {:?}", sub_errs)
             }
         }
     }

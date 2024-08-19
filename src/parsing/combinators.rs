@@ -438,6 +438,61 @@ where
     move |input| parser.run(input).map_err(&mapper_function)
 }
 
+/// Returns the same parser as the one given, but allows to map its potential parse output to another type, using the mapper_function
+///
+/// # Examples
+///
+/// Example 1:
+/// ```
+/// use crate::morphlang::parsing::combinators::{map_parser_output, parser_character_predicate, repeat_at_least_1, ParserInput};
+/// use crate::morphlang::parsing::parser::Parser;
+///
+/// let input = ParserInput::create("your input");
+/// let parser = repeat_at_least_1(parser_character_predicate(char::is_alphabetic, "ALPHABETIC")); // This parser return a Vec<char>
+/// let mapped_parser = map_parser_output(parser, |v| v.iter().collect::<String>());
+///
+/// match mapped_parser.run(&input) {
+///     Err(e) => panic!("Parser wasn't supposed to fail !"),
+///     Ok((remaining_input, parsed)) => {
+///         assert_eq!(parsed, "your");
+///         assert_eq!(remaining_input.get_as_string(), " input");
+///     },
+/// }
+/// ```
+pub fn map_parser_output<InputType: Clone, OutputType1, OutputType2, ErrorType, P, F>(
+    parser: P,
+    mapper_function: F,
+) -> impl Fn(&InputType) -> Result<(InputType, OutputType2), ErrorType>
+where
+    P: Parser<InputType, ErrorType, OutputType1>,
+    F: Fn(OutputType1) -> OutputType2,
+{
+    move |input| {
+        parser
+            .run(input)
+            .map(|(remaining_input, parsed)| (remaining_input, mapper_function(parsed)))
+    }
+}
+
+/// Used to map both the output and the error types of the given parser. Works like chaining `map_parser_output` and `map_parser_error`.
+pub fn map_parser<InputType: Clone, OutputType1, OutputType2, ErrorType1, ErrorType2, P, F1, F2>(
+    parser: P,
+    output_mapper: F1,
+    error_mapper: F2,
+) -> impl Fn(&InputType) -> Result<(InputType, OutputType2), ErrorType2>
+where
+    P: Parser<InputType, ErrorType1, OutputType1>,
+    F1: Fn(OutputType1) -> OutputType2,
+    F2: Fn(ErrorType1) -> ErrorType2,
+{
+    move |input| {
+        parser
+            .run(input)
+            .map(|(remaining_input, parsed)| (remaining_input, output_mapper(parsed)))
+            .map_err(&error_mapper)
+    }
+}
+
 /// Matches parser1 then parser2, and returns only the result of parser 2
 ///
 /// # Examples
@@ -496,22 +551,6 @@ where
 }
 
 /// Matches parser1 then parser2, and returns only the result of parser 1
-pub fn and<InputType: Clone, ErrorType, OutputType1, OutputType2, P1, P2>(
-    parser1: P1,
-    parser2: P2,
-) -> impl Fn(&InputType) -> Result<(InputType, OutputType1), ErrorType>
-where
-    P1: Parser<InputType, ErrorType, OutputType1>,
-    P2: Parser<InputType, ErrorType, OutputType2>,
-{
-    move |input| {
-        let (remaining_input, parsed) = parser1.run(input)?;
-        parser2.run(&remaining_input)?;
-        Ok((remaining_input, parsed))
-    }
-}
-
-/// Matches parser1 OR parser2, and returns the result of the first one that succeeds, or both errors if both fail
 ///
 /// # Examples
 ///
@@ -554,6 +593,22 @@ where
 ///     Ok(v) => panic!("Parser was supposed to fail, got Ok({:?})", v),
 /// }
 /// ```
+pub fn and<InputType: Clone, ErrorType, OutputType1, OutputType2, P1, P2>(
+    parser1: P1,
+    parser2: P2,
+) -> impl Fn(&InputType) -> Result<(InputType, OutputType1), ErrorType>
+where
+    P1: Parser<InputType, ErrorType, OutputType1>,
+    P2: Parser<InputType, ErrorType, OutputType2>,
+{
+    move |input| {
+        let (remaining_input, parsed) = parser1.run(input)?;
+        parser2.run(&remaining_input)?;
+        Ok((remaining_input, parsed))
+    }
+}
+
+/// Matches parser1 OR parser2, and returns the result of the first one that succeeds, or both errors if both fail
 pub fn or<InputType: Clone, ErrorType1, ErrorType2, OutputType, P1, P2>(
     parser1: P1,
     parser2: P2,
@@ -615,6 +670,25 @@ where
     move |input| match parser.run(input) {
         Ok(_) => Err(()),
         Err(_) => Ok((input.clone(), ())),
+    }
+}
+
+/// Similarly to `or`, takes a vector of parsers, runs them in order and return the first one that succeeds, or a vector of all the errors if they all fail.
+pub fn any_of<InputType: Clone, ErrorType, OutputType, P>(
+    parsers: Vec<P>,
+) -> impl Fn(&InputType) -> Result<(InputType, OutputType), Vec<ErrorType>>
+where
+    P: Parser<InputType, ErrorType, OutputType>,
+{
+    move |input| {
+        let mut errs: Vec<ErrorType> = Vec::new();
+        for parser in parsers.iter() {
+            match parser.run(input) {
+                Err(e) => errs.push(e),
+                Ok(v) => return Ok(v),
+            }
+        }
+        Err(errs)
     }
 }
 
