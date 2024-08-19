@@ -1,6 +1,6 @@
 use core::fmt;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ParserErrorInfo {
     kind: ParserErrorKind,
     info: Option<String>,
@@ -19,9 +19,28 @@ impl ParserErrorInfo {
     pub fn create(kind: ParserErrorKind) -> Self {
         Self { kind, info: None }
     }
+
+    pub fn set_info(&mut self, info: String) {
+        self.info = Some(info);
+    }
+
+    pub fn with_info(&self, info: String) -> Self {
+        Self {
+            kind: self.kind.clone(),
+            info: Some(info),
+        }
+    }
+
+    pub fn get_kind(&self) -> &ParserErrorKind {
+        &self.kind
+    }
+
+    pub fn get_info(&self) -> &Option<String> {
+        &self.info
+    }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ParserErrorKind {
     Unknown,
     ExpectedCharacter { predicate_info: String },

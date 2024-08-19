@@ -286,6 +286,35 @@ where
     }
 }
 
+pub fn or<InputType: Clone, ErrorType1, ErrorType2, OutputType, P1, P2>(
+    parser1: P1,
+    parser2: P2,
+) -> impl Fn(&InputType) -> Result<(InputType, OutputType), (ErrorType1, ErrorType2)>
+where
+    P1: Parser<InputType, ErrorType1, OutputType>,
+    P2: Parser<InputType, ErrorType2, OutputType>,
+{
+    move |input| match parser1.run(input) {
+        Err(err1) => match parser2.run(input) {
+            Err(err2) => Err((err1, err2)),
+            Ok(v) => Ok(v),
+        },
+        Ok(v) => Ok(v),
+    }
+}
+
+pub fn not<InputType: Clone, ErrorType, OutputType, P>(
+    parser: P,
+) -> impl Fn(&InputType) -> Result<(InputType, ()), Option<ErrorType>>
+where
+    P: Parser<InputType, ErrorType, OutputType>,
+{
+    move |input| match parser.run(input) {
+        Ok(_) => Err(None),
+        Err(_) => Ok((input.clone(), ())),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{assert_is_error_print_ok, parsing::parser::run_parser};
@@ -489,5 +518,101 @@ mod tests {
             assert_eq_parse_input!(rest, 3, 0, 3);
         }
         Ok(())
+    }
+
+    #[test]
+    fn test_or() -> Result<(), ParserErrorInfo> {
+        let parser = or(
+            or(
+                parser_token("int".to_string()),
+                parser_token("float".to_string()),
+            ),
+            or(
+                parser_token("void".to_string()),
+                parser_token("double".to_string()),
+            ),
+        );
+        {
+            let input = ParserInput::create("int x = 5;");
+            let (rest, parsed) = run_parser(&parser, &input).unwrap();
+            assert_eq_position_info!(parsed, 0, 0, 0, 3, 0, 3);
+            assert_eq_parse_input!(rest, 3, 0, 3);
+        }
+        {
+            let input = ParserInput::create("void foo() {}");
+            let (rest, parsed) = run_parser(&parser, &input).unwrap();
+            assert_eq_position_info!(parsed, 0, 0, 0, 4, 0, 4);
+            assert_eq_parse_input!(rest, 4, 0, 4);
+        }
+        {
+            let input = ParserInput::create("float x = 5.2f;");
+            let (rest, parsed) = run_parser(&parser, &input).unwrap();
+            assert_eq_position_info!(parsed, 0, 0, 0, 5, 0, 5);
+            assert_eq_parse_input!(rest, 5, 0, 5);
+        }
+        {
+            let input = ParserInput::create("double x = 5.2;");
+            let (rest, parsed) = run_parser(&parser, &input).unwrap();
+            assert_eq_position_info!(parsed, 0, 0, 0, 6, 0, 6);
+            assert_eq_parse_input!(rest, 6, 0, 6);
+        }
+        {
+            let input = ParserInput::create("long x = 7;");
+            assert_is_error_print_ok!(run_parser(&parser, &input));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_not() {
+        let parser_letters = repeat_at_least_1(parser_character_predicate(
+            char::is_alphabetic,
+            "ALPHABETIC",
+        ));
+        let parser_not_digit = not(parser_character_predicate(char::is_numeric, "NUMERIC"));
+        let parser = and(
+            map_parser_error(parser_letters, |_| {
+                ParserErrorInfo::create(ParserErrorKind::Unknown)
+                    .with_info("Parser of a string of letters failed because it didn't find a letter to start the string".to_string())
+            }),
+            map_parser_error(parser_not_digit, |e| match e {
+                None => ParserErrorInfo::create(ParserErrorKind::Unknown)
+                    .with_info("Parser of a non-digit failed because it found a digit".to_string()),
+                Some(err) => err,
+            }),
+        ); // a parser for a string of letters that does not end in a digit, only getting the letter string part
+        {
+            let input = ParserInput::create("asdfasdf;");
+            let (rest, parsed) = run_parser(&parser, &input).unwrap();
+            assert_eq!(parsed.iter().collect::<String>(), "asdfasdf");
+            assert_eq_parse_input!(rest, 8, 0, 8);
+        }
+        {
+            let input = ParserInput::create("qqqO;");
+            let (rest, parsed) = run_parser(&parser, &input).unwrap();
+            assert_eq!(parsed.iter().collect::<String>(), "qqqO");
+            assert_eq_parse_input!(rest, 4, 0, 4);
+        }
+        {
+            let input = ParserInput::create("print(18)");
+            let (rest, parsed) = run_parser(&parser, &input).unwrap();
+            assert_eq!(parsed.iter().collect::<String>(), "print");
+            assert_eq_parse_input!(rest, 5, 0, 5);
+        }
+        {
+            let input = ParserInput::create("repeat0();");
+            match run_parser(&parser, &input) {
+                Ok(v) => panic!("Expected parser to fail, got Ok({:?}).", v),
+                Err(e) => {
+                    if let Some(err) = e.get_info() {
+                        if !err.starts_with("Parser of a non-digit") {
+                            panic!("Parser failed for the wrong reason: {:?}", e);
+                        }
+                    } else {
+                        panic!("Parser failed for the wrong reason: {:?}", e);
+                    }
+                }
+            }
+        }
     }
 }
