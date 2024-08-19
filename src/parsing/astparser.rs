@@ -67,24 +67,23 @@ pub fn parse_hex_literal_int(
     run_parser(
         map_parser(
             and_then2(
-                map_parser_error(parser_token("0x".to_string()), |_| ()),
-                and(
-                    repeat_at_least_1(parser_character_predicate(
-                        |c| c.is_ascii_hexdigit() || c == '_',
-                        "HEX_DIGIT_OR_UNDERSCORE",
-                    )),
-                    not(parser_character_predicate(
-                        char::is_alphabetic,
-                        "ALPHABETIC",
-                    )),
+                parser_token("0x".to_string()),
+                map_parser_error(
+                    and(
+                        repeat_at_least_1(parser_character_predicate(
+                            |c| c.is_ascii_hexdigit() || c == '_',
+                            "HEX_DIGIT_OR_UNDERSCORE",
+                        )),
+                        not(parser_character_predicate(
+                            char::is_alphabetic,
+                            "ALPHABETIC",
+                        )),
+                    ),
+                    |_| ParserErrorInfo::create(ParserErrorKind::InvalidLiteral).with_level(5),
                 ),
             ),
             |v| Expression::LiteralInt(v.iter().filter(|&&c| c != '_').collect::<String>(), 16),
-            |_| {
-                ParserErrorInfo::create(ParserErrorKind::ExpectedExpressionKind(
-                    ExpressionKind::LiteralInt,
-                ))
-            },
+            |e| e.with_info("In `parse_hex_literal_int`".to_string()),
         ),
         input,
     )
@@ -96,24 +95,23 @@ pub fn parse_oct_literal_int(
     run_parser(
         map_parser(
             and_then2(
-                map_parser_error(parser_token("0o".to_string()), |_| ()),
-                and(
-                    repeat_at_least_1(parser_character_predicate(
-                        |c| ('0'..='7').contains(&c) || c == '_',
-                        "OCT_DIGIT_OR_UNDERSCORE",
-                    )),
-                    not(parser_character_predicate(
-                        char::is_alphanumeric,
-                        "ALPHANUMERIC",
-                    )),
+                parser_token("0o".to_string()),
+                map_parser_error(
+                    and(
+                        repeat_at_least_1(parser_character_predicate(
+                            |c| ('0'..='7').contains(&c) || c == '_',
+                            "OCT_DIGIT_OR_UNDERSCORE",
+                        )),
+                        not(parser_character_predicate(
+                            char::is_alphanumeric,
+                            "ALPHANUMERIC",
+                        )),
+                    ),
+                    |_| ParserErrorInfo::create(ParserErrorKind::InvalidLiteral).with_level(5),
                 ),
             ),
             |v| Expression::LiteralInt(v.iter().filter(|&&c| c != '_').collect::<String>(), 8),
-            |_| {
-                ParserErrorInfo::create(ParserErrorKind::ExpectedExpressionKind(
-                    ExpressionKind::LiteralInt,
-                ))
-            },
+            |e| e.with_info("In `parse_oct_literal_int`".to_string()),
         ),
         input,
     )
@@ -125,24 +123,23 @@ pub fn parse_bin_literal_int(
     run_parser(
         map_parser(
             and_then2(
-                map_parser_error(parser_token("0b".to_string()), |_| ()),
-                and(
-                    repeat_at_least_1(parser_character_predicate(
-                        |c| c == '0' || c == '1' || c == '_',
-                        "BIN_DIGIT_OR_UNDERSCORE",
-                    )),
-                    not(parser_character_predicate(
-                        |c| c.is_alphanumeric(),
-                        "ALPHANUMERIC",
-                    )),
+                parser_token("0b".to_string()),
+                map_parser_error(
+                    and(
+                        repeat_at_least_1(parser_character_predicate(
+                            |c| c == '0' || c == '1' || c == '_',
+                            "BIN_DIGIT_OR_UNDERSCORE",
+                        )),
+                        not(parser_character_predicate(
+                            |c| c.is_alphanumeric(),
+                            "ALPHANUMERIC",
+                        )),
+                    ),
+                    |_| ParserErrorInfo::create(ParserErrorKind::InvalidLiteral).with_level(5),
                 ),
             ),
             |v| Expression::LiteralInt(v.iter().filter(|&&c| c != '_').collect::<String>(), 2),
-            |_| {
-                ParserErrorInfo::create(ParserErrorKind::ExpectedExpressionKind(
-                    ExpressionKind::LiteralInt,
-                ))
-            },
+            |e| e.with_info("In `parse_bin_literal_int`".to_string()),
         ),
         input,
     )
@@ -159,7 +156,16 @@ pub fn parse_literal_int(
                 parse_bin_literal_int,
                 parse_decimal_literal_int,
             ]),
-            |errs| ParserErrorInfo::create(ParserErrorKind::SubErrorList(errs)),
+            |errs| {
+                let level = errs
+                    .iter()
+                    .max_by_key(|e| e.get_level())
+                    .map(|e| e.get_level())
+                    .unwrap_or(0);
+                ParserErrorInfo::create(ParserErrorKind::SubErrorList(errs))
+                    .with_info("In `parse_literal_int`".to_string())
+                    .with_level(if level == 0 { 0 } else { level + 2 })
+            },
         ),
         input,
     )
@@ -171,7 +177,12 @@ pub fn parse_parenthesis_expression(
     move |input| {
         run_parser(
             and_then1(
-                and_then2(parser_character('('), parse_expression(context.clone())),
+                and_then2(
+                    parser_character('('),
+                    map_parser_error(parse_expression(context.clone()), |e| {
+                        e.with_increased_level(2)
+                    }),
+                ),
                 parser_character(')'),
             ),
             input,
@@ -220,7 +231,15 @@ pub fn parse_primary(
                     Box::from(parse_parenthesis_expression(context.clone())),
                     Box::from(parse_literal_int),
                 ]),
-                |errs| ParserErrorInfo::create(ParserErrorKind::SubErrorList(errs)),
+                |errs| {
+                    let level = errs
+                        .iter()
+                        .max_by_key(|e| e.get_level())
+                        .map(|e| e.get_level())
+                        .unwrap_or(0);
+                    ParserErrorInfo::create(ParserErrorKind::SubErrorList(errs))
+                        .with_level(if level == 0 { 0 } else { level + 2 })
+                },
             ),
             input,
         )
