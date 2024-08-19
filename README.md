@@ -10,3 +10,10 @@ Morph, a functional and imperative programming language.
     - [ ] Type inference
 - [ ] LLVM IR Generation
 - [ ] Build the binary
+
+## Example builds
+
+### See the parser combinators in action:
+```sh
+cargo run --example combinators
+```

@@ -1,0 +1,233 @@
+use crossterm::{
+    cursor,
+    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
+    execute,
+    style::{Color, ResetColor, SetForegroundColor},
+    terminal::{self, ClearType},
+    Result,
+};
+use morphlang::parsing::{
+    astparser::{
+        parse_bin_literal_int, parse_decimal_literal_int, parse_hex_literal_int, parse_literal_int,
+        parse_oct_literal_int,
+    },
+    combinators::ParserInput,
+    error::ParserErrorInfo,
+    parser::Parser,
+};
+use std::io::{stdout, Write};
+
+fn main() -> Result<()> {
+    let mut stdout = stdout();
+
+    terminal::enable_raw_mode()?;
+    execute!(
+        stdout,
+        terminal::Clear(ClearType::All),
+        cursor::MoveTo(0, 0)
+    )?;
+
+    let mut input = String::new();
+    let mut cursor_pos: u16 = 0;
+    update_display(&input, &mut cursor_pos)?;
+
+    loop {
+        if event::poll(std::time::Duration::from_millis(1))? {
+            if let Event::Key(key_event) = event::read()? {
+                if key_event.kind == KeyEventKind::Release {
+                    continue;
+                }
+                match key_event.code {
+                    KeyCode::Char(c) => {
+                        if (c == 'C' || c == 'c')
+                            && key_event.modifiers.contains(KeyModifiers::CONTROL)
+                        {
+                            break;
+                        }
+                        if !c.is_ascii() {
+                            continue;
+                        }
+                        input.insert(cursor_pos as usize, c);
+                        cursor_pos += 1;
+                        update_display(&input, &mut cursor_pos)?;
+                    }
+                    KeyCode::Left => {
+                        let mut last_char = '\0';
+                        let mut count: u16 = 0;
+                        while cursor_pos > 0
+                            && is_same_type(
+                                last_char,
+                                input.chars().nth(cursor_pos as usize - 1).unwrap(),
+                            )
+                        {
+                            last_char = input.chars().nth(cursor_pos as usize - 1).unwrap();
+                            cursor_pos -= 1;
+                            count += 1;
+
+                            if !key_event.modifiers.contains(KeyModifiers::CONTROL) {
+                                break;
+                            }
+                        }
+                        if count > 0 {
+                            execute!(stdout, cursor::MoveLeft(count))?;
+                        }
+                    }
+                    KeyCode::Right => {
+                        let mut last_char = '\0';
+                        let mut count: u16 = 0;
+                        while (cursor_pos as usize) < input.len()
+                            && is_same_type(
+                                last_char,
+                                input.chars().nth(cursor_pos as usize).unwrap(),
+                            )
+                        {
+                            last_char = input.chars().nth(cursor_pos as usize).unwrap();
+                            cursor_pos += 1;
+                            count += 1;
+
+                            if !key_event.modifiers.contains(KeyModifiers::CONTROL) {
+                                break;
+                            }
+                        }
+                        if count > 0 {
+                            execute!(stdout, cursor::MoveRight(count))?;
+                        }
+                    }
+                    KeyCode::Backspace => {
+                        let mut last_char = '\0';
+                        while cursor_pos > 0
+                            && is_same_type(
+                                last_char,
+                                input.chars().nth(cursor_pos as usize - 1).unwrap(),
+                            )
+                        {
+                            last_char = if cursor_pos as usize >= input.len() {
+                                input.pop().unwrap()
+                            } else {
+                                input.remove(cursor_pos as usize - 1)
+                            };
+
+                            cursor_pos -= 1;
+                            if !key_event.modifiers.contains(KeyModifiers::CONTROL) {
+                                break;
+                            }
+                        }
+                        update_display(&input, &mut cursor_pos)?;
+                    }
+                    KeyCode::Delete => {
+                        let mut last_char = '\0';
+                        while (cursor_pos as usize) < input.len()
+                            && is_same_type(
+                                last_char,
+                                input.chars().nth(cursor_pos as usize).unwrap(),
+                            )
+                        {
+                            last_char = input.remove(cursor_pos as usize);
+
+                            if !key_event.modifiers.contains(KeyModifiers::CONTROL) {
+                                break;
+                            }
+                        }
+                        update_display(&input, &mut cursor_pos)?;
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    terminal::disable_raw_mode()?;
+    Ok(())
+}
+
+fn is_same_type(c1: char, c2: char) -> bool {
+    if c1 == '\0' {
+        true
+    } else if c1.is_ascii_digit() {
+        c2.is_ascii_digit()
+    } else if c1.is_ascii_alphabetic() {
+        c2.is_ascii_alphabetic()
+    } else if c1.is_ascii_whitespace() {
+        c2.is_ascii_whitespace()
+    } else {
+        false
+    }
+}
+
+fn update_display(input: &str, cursor_pos: &mut u16) -> Result<()> {
+    let mut stdout = stdout();
+
+    execute!(stdout, cursor::MoveTo(0, 0),)?;
+
+    if *cursor_pos as usize > input.len() {
+        *cursor_pos = input.len() as u16;
+    }
+
+    let mut len_counter: usize = 0;
+
+    // ADD COMBINATORS HERE /!\
+    write_combinator_output(
+        parse_decimal_literal_int,
+        input,
+        "DEC int: ",
+        &mut len_counter,
+    )?;
+    write_combinator_output(parse_hex_literal_int, input, "HEX int: ", &mut len_counter)?;
+    write_combinator_output(parse_oct_literal_int, input, "OCT int: ", &mut len_counter)?;
+    write_combinator_output(parse_bin_literal_int, input, "BIN int: ", &mut len_counter)?;
+    write_combinator_output(parse_literal_int, input, "int lit: ", &mut len_counter)?;
+
+    for _ in 0..(len_counter - 1) {
+        write!(stdout, ">")?;
+    }
+    write!(stdout, " {}", input)?;
+    execute!(
+        stdout,
+        terminal::Clear(ClearType::UntilNewLine),
+        cursor::MoveToColumn(len_counter as u16 + *cursor_pos)
+    )?;
+
+    stdout.flush()?;
+    Ok(())
+}
+
+fn write_combinator_output<O, P>(
+    combinator: P,
+    input: &str,
+    prefix: &str,
+    len_counter: &mut usize,
+) -> Result<()>
+where
+    P: Parser<ParserInput, ParserErrorInfo, O>,
+{
+    let mut stdout = stdout();
+
+    let input = ParserInput::create(input);
+    write!(stdout, "{}", prefix)?;
+    *len_counter = prefix.len();
+
+    match combinator.run(&input) {
+        Err(_) => {
+            execute!(stdout, SetForegroundColor(Color::Red))?;
+            write!(stdout, "{}", input.get_as_string())?;
+        }
+        Ok((remaining_input, _)) => {
+            execute!(stdout, SetForegroundColor(Color::Green))?;
+            write!(
+                stdout,
+                "{}",
+                remaining_input.get_before().get_as_string(input)
+            )?;
+            execute!(stdout, SetForegroundColor(Color::Red))?;
+            write!(stdout, "{}", remaining_input.get_as_string())?;
+        }
+    }
+
+    execute!(
+        stdout,
+        ResetColor,
+        terminal::Clear(ClearType::UntilNewLine),
+        cursor::MoveToNextLine(1)
+    )?;
+    Ok(())
+}
