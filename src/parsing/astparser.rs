@@ -198,7 +198,7 @@ pub fn parse_unary_operator(
             let (_, next_input) = input
                 .advance_by(op_str.len())
                 .ok_or(ParserErrorInfo::create(ParserErrorKind::EndOfFile))?;
-            let (next_input, rhs) = parse_primary(context.clone()).run(&next_input)?;
+            let (next_input, rhs) = parse_expression_internal(&next_input, &context, found_prec)?;
             Ok((
                 next_input,
                 Expression::UnaryOperation(Box::new(rhs), op_str),
