@@ -1,13 +1,18 @@
 use std::rc::Rc;
 
+use crate::type_checker::types::{BoolProperty, ObjectTypeBase, Proposition, Type};
+
 use super::{
-    ast::{BinaryOperatorPrecedence, Expression, ExpressionKind, UnaryOperatorPrecedence},
-    combinators::{
-        and, and_then1, and_then2, any_of, any_of_boxes, map_parser, map_parser_error, not,
-        parser_character, parser_character_predicate, parser_nothing, parser_token,
-        repeat_at_least_1, skip_whitespaces, ParserInput,
+    ast::{
+        BinaryOperatorPrecedence, Expression, ExpressionKind, Identifier, UnaryOperatorPrecedence,
     },
-    error::{ParserErrorInfo, ParserErrorKind},
+    combinators::{
+        and, and_then1, and_then2, any_of, any_of_boxes, delimited, map_parser, map_parser_error,
+        map_parser_output, not, parse_then_restart, parser_character, parser_character_predicate,
+        parser_nothing, parser_token, repeat_at_least_1, skip_whitespaces, ParserInput,
+        PositionInfo,
+    },
+    error::{elevate_highest_error, ParserErrorInfo, ParserErrorKind},
     parser::{run_parser, Parser},
 };
 
@@ -26,6 +31,25 @@ impl ASTParserContext {
             binary_operators,
             unary_operators,
         }
+    }
+}
+
+pub trait IncreaseErrorLevel<InputType: Clone, OutputType> {
+    fn increase_error_level(
+        &self,
+        diff: i32,
+    ) -> impl Fn(&InputType) -> Result<(InputType, OutputType), ParserErrorInfo>;
+}
+
+impl<InputType: Clone, OutputType, P> IncreaseErrorLevel<InputType, OutputType> for P
+where
+    P: Parser<InputType, ParserErrorInfo, OutputType>,
+{
+    fn increase_error_level(
+        &self,
+        diff: i32,
+    ) -> impl Fn(&InputType) -> Result<(InputType, OutputType), ParserErrorInfo> {
+        move |input| self.run(input).map_err(|e| e.with_increased_level(diff))
     }
 }
 
@@ -177,16 +201,7 @@ pub fn parse_literal_int(
                 parse_bin_literal_int,
                 parse_decimal_literal_int,
             ]),
-            |errs| {
-                let level = errs
-                    .iter()
-                    .max_by_key(|e| e.get_level())
-                    .map(|e| e.get_level())
-                    .unwrap_or(0);
-                ParserErrorInfo::create(ParserErrorKind::SubErrorList(errs))
-                    .with_info("In `parse_literal_int`".to_string())
-                    .with_level(if level == 0 { 0 } else { level + 2 })
-            },
+            elevate_highest_error(2),
         ),
         input,
     )
@@ -252,22 +267,13 @@ pub fn parse_primary(
                     Box::from(parse_parenthesis_expression(context.clone())),
                     Box::from(parse_literal_int),
                 ]),
-                |errs| {
-                    let level = errs
-                        .iter()
-                        .max_by_key(|e| e.get_level())
-                        .map(|e| e.get_level())
-                        .unwrap_or(0);
-                    ParserErrorInfo::create(ParserErrorKind::SubErrorList(errs))
-                        .with_level(if level == 0 { 0 } else { level + 2 })
-                },
+                elevate_highest_error(2),
             ),
             input,
         )
     }
 }
 
-// TODO: test
 pub fn parse_expression(
     context: Rc<ASTParserContext>,
 ) -> impl Fn(&ParserInput) -> Result<(ParserInput, Expression), ParserErrorInfo> {
@@ -335,6 +341,141 @@ fn parse_expression_internal(
     }
 
     Ok((input, lhs))
+}
+
+pub fn parse_identifier(input: &ParserInput) -> Result<(ParserInput, Identifier), ParserErrorInfo> {
+    run_parser(
+        and_then2(
+            parse_then_restart(parser_character_predicate(
+                char::is_alphabetic,
+                "ALPHABETIC",
+            )),
+            map_parser(
+                repeat_at_least_1(parser_character_predicate(
+                    |c| c == '_' || c.is_alphanumeric(),
+                    "ALPHANUMERIC_OR_UNDERSCORE",
+                )),
+                |v| Identifier::create(v.iter().collect()),
+                |_| ParserErrorInfo::create(ParserErrorKind::ExpectedIdentifier),
+            ),
+        ),
+        input,
+    )
+}
+
+pub fn parse_type_base(
+    input: &ParserInput,
+) -> Result<(ParserInput, ObjectTypeBase), ParserErrorInfo> {
+    run_parser(
+        map_parser_output(parse_identifier, |v| match v.0.as_str() {
+            "i32" => ObjectTypeBase::Int32,
+            "i64" => ObjectTypeBase::Int64,
+            "u32" => ObjectTypeBase::UInt32,
+            "u64" => ObjectTypeBase::UInt64,
+            "bool" => ObjectTypeBase::Bool,
+            "void" => ObjectTypeBase::Void,
+            "Proof" => ObjectTypeBase::Proof,
+            _ => ObjectTypeBase::UserDefined(v),
+        }),
+        input,
+    )
+}
+
+pub fn parse_generics(
+    context: &Rc<ASTParserContext>,
+    input: &ParserInput,
+) -> Result<(ParserInput, Vec<Type>), ParserErrorInfo> {
+    match run_parser(parser_character('<'), input) {
+        Ok((input, _)) => run_parser(
+            and_then1(
+                delimited(
+                    skip_whitespaces(parser_character(',')),
+                    skip_whitespaces(parse_type(context.clone())),
+                ),
+                skip_whitespaces(parser_character('>')),
+            ),
+            &input,
+        ),
+        Err(_) => Ok((input.clone(), Vec::new())),
+    }
+}
+
+pub fn parse_type(
+    context: Rc<ASTParserContext>,
+) -> impl Fn(&ParserInput) -> Result<(ParserInput, Type), ParserErrorInfo> {
+    move |input| {
+        let (input, type_base) = parse_type_base(input)?;
+
+        if type_base == ObjectTypeBase::Proof {
+            let (input, _) = run_parser(parser_character('<').increase_error_level(5), &input)?;
+            let (input, prop) = run_parser(
+                parse_proposition(context.clone()).increase_error_level(5),
+                &input,
+            )?;
+            let (input, _) = run_parser(parser_character('>'), &input)?;
+
+            Ok((input, Type::Proof(prop)))
+        } else {
+            let (input, generics) = parse_generics(&context, &input)?;
+
+            Ok((
+                input,
+                Type::Object {
+                    base: type_base,
+                    generics,
+                },
+            ))
+        }
+    }
+}
+
+pub fn parse_keyword(
+    kw: String,
+) -> impl Fn(&ParserInput) -> Result<(ParserInput, PositionInfo), ParserErrorInfo> {
+    move |input| {
+        let start = PositionInfo::from_parser_input_position(input);
+        let (input, ident) = parse_identifier(input)?;
+        if ident.0 != kw {
+            Err(ParserErrorInfo::create(ParserErrorKind::ExpectedKeyword(
+                kw.clone(),
+            )))
+        } else {
+            let end = PositionInfo::from_parser_input_position(&input);
+            Ok((input, start.until(&end)))
+        }
+    }
+}
+
+pub fn parse_proposition_property_of_expression(
+    context: Rc<ASTParserContext>,
+) -> impl Fn(&ParserInput) -> Result<(ParserInput, Proposition), ParserErrorInfo> {
+    move |input| {
+        let (input, expr) = parse_expression(context.clone()).run(input)?;
+        let (input, _) = skip_whitespaces(parse_keyword("is".to_string())).run(&input)?;
+        let (input, property) =
+            skip_whitespaces(parse_identifier.increase_error_level(5)).run(&input)?;
+
+        Ok((
+            input,
+            Proposition::PropertyOfExpression(BoolProperty::UserDefined(property), expr),
+        ))
+    }
+}
+
+pub fn parse_proposition(
+    context: Rc<ASTParserContext>,
+) -> impl Fn(&ParserInput) -> Result<(ParserInput, Proposition), ParserErrorInfo> {
+    move |input| {
+        run_parser(
+            skip_whitespaces(map_parser_error(
+                any_of(vec![parse_proposition_property_of_expression(
+                    context.clone(),
+                )]),
+                elevate_highest_error(2),
+            )),
+            input,
+        )
+    }
 }
 
 #[cfg(test)]

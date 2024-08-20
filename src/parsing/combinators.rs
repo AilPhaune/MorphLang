@@ -44,6 +44,12 @@ macro_rules! assert_eq_position_info {
 }
 
 #[derive(Debug, Clone)]
+pub enum Either<A, B> {
+    First(A),
+    Second(B),
+}
+
+#[derive(Debug, Clone)]
 pub struct ParserInput {
     pub code: Rc<String>,
     pub current_index: usize,
@@ -858,6 +864,52 @@ where
                 Ok((remaining_input, parsed))
             }
         }
+    }
+}
+
+pub fn parse_then_restart<InputType: Clone, ErrorType, OutputType, P>(
+    parser: P,
+) -> impl Fn(&InputType) -> Result<(InputType, OutputType), ErrorType>
+where
+    P: Parser<InputType, ErrorType, OutputType>,
+{
+    move |input| parser.run(input).map(|(_, v)| (input.clone(), v))
+}
+
+pub fn delimited<InputType: Clone, ErrorType1, ErrorType2, OutputType1, OutputType2, P1, P2>(
+    delimiter: P1,
+    element: P2,
+) -> impl Fn(&InputType) -> Result<(InputType, Vec<OutputType2>), ErrorType2>
+where
+    P1: Parser<InputType, ErrorType1, OutputType1>,
+    P2: Parser<InputType, ErrorType2, OutputType2>,
+{
+    move |input| {
+        let mut values = Vec::new();
+        let (mut input, value) = element.run(input)?;
+        values.push(value);
+
+        loop {
+            if let Ok((input1, _)) = delimiter.run(&input) {
+                let (input2, value) = element.run(&input1)?;
+                values.push(value);
+                input = input2;
+            } else {
+                return Ok((input, values));
+            }
+        }
+    }
+}
+
+pub fn optional<InputType: Clone, ErrorType, OutputType, P>(
+    parser: P,
+) -> impl Fn(&InputType) -> Result<(InputType, Option<OutputType>), ()>
+where
+    P: Parser<InputType, ErrorType, OutputType>,
+{
+    move |input| match parser.run(input) {
+        Ok((remaining_input, parsed)) => Ok((remaining_input, Some(parsed))),
+        Err(_) => Ok((input.clone(), None)),
     }
 }
 

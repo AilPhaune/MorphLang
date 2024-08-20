@@ -12,9 +12,10 @@ use morphlang::{
         ast::{BinaryOperatorPrecedence, UnaryOperatorPrecedence},
         astparser::{
             parse_bin_literal_int, parse_decimal_literal_int, parse_expression,
-            parse_hex_literal_int, parse_literal_int, parse_oct_literal_int, ASTParserContext,
+            parse_hex_literal_int, parse_identifier, parse_literal_int, parse_oct_literal_int,
+            parse_proposition, parse_type, parse_type_base, ASTParserContext,
         },
-        combinators::ParserInput,
+        combinators::{delimited, parser_character, ParserInput},
         error::ParserErrorInfo,
         parser::Parser,
     },
@@ -225,11 +226,25 @@ fn update_display(
 
     // ADD COMBINATORS HERE /!\
     write_combinator_output(parse_decimal_literal_int, input, "DEC int: ", len_counter)?;
-
     write_combinator_output(parse_hex_literal_int, input, "HEX int: ", len_counter)?;
     write_combinator_output(parse_oct_literal_int, input, "OCT int: ", len_counter)?;
     write_combinator_output(parse_bin_literal_int, input, "BIN int: ", len_counter)?;
     write_combinator_output(parse_literal_int, input, "int lit: ", len_counter)?;
+    write_combinator_output(parse_identifier, input, "identifier: ", len_counter)?;
+    write_combinator_output(
+        delimited(parser_character(','), parse_expression(context.clone())),
+        input,
+        "',' delimited expr: ",
+        len_counter,
+    )?;
+    write_combinator_output(parse_type_base, input, "type base: ", len_counter)?;
+    write_combinator_output(parse_type(context.clone()), input, "type: ", len_counter)?;
+    write_combinator_output(
+        parse_proposition(context.clone()),
+        input,
+        "proposition: ",
+        len_counter,
+    )?;
     write_combinator_output(
         parse_expression(context.clone()),
         input,

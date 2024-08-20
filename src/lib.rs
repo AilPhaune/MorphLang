@@ -1,5 +1,6 @@
 pub mod parsing;
 pub mod traits;
+pub mod type_checker;
 
 #[macro_export]
 macro_rules! assert_is_error_print_ok {

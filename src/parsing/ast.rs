@@ -1,5 +1,7 @@
 use core::fmt;
 
+use crate::type_checker::types::Type;
+
 #[derive(Debug, Clone)]
 pub enum BinaryOperatorPrecedence {
     LeftAssociative(u64, String),
@@ -19,11 +21,28 @@ impl UnaryOperatorPrecedence {
     }
 }
 
+#[derive(Debug, PartialEq, Clone)]
+pub struct Identifier(pub String);
+impl Identifier {
+    pub fn new(s: &str) -> Self {
+        Self(s.to_owned())
+    }
+
+    pub fn create(s: String) -> Self {
+        Self(s)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Expression {
     LiteralInt(String, i32),
     BinaryOperation(Box<Expression>, Box<Expression>, String),
     UnaryOperation(Box<Expression>, String),
+}
+
+#[derive(Debug, Clone)]
+pub enum Statement {
+    VarDeclaration(Identifier, Option<Type>, Option<Box<Expression>>),
 }
 
 #[derive(Debug, Clone, Copy)]

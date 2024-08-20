@@ -94,6 +94,8 @@ pub enum ParserErrorKind {
     SubErrorList(Vec<ParserErrorInfo>),
     InvalidLiteral,
     UnexpectedInput,
+    ExpectedIdentifier,
+    ExpectedKeyword(String),
 }
 
 impl fmt::Display for ParserErrorKind {
@@ -101,8 +103,10 @@ impl fmt::Display for ParserErrorKind {
         match &self {
             Self::Unknown => write!(f, "Unknown error"),
             Self::InvalidLiteral => write!(f, "Invalid literal"),
+            Self::ExpectedIdentifier => write!(f, "Expected identifier"),
             Self::EndOfFile => write!(f, "End of input"),
             Self::UnexpectedInput => write!(f, "Unexpected input"),
+            Self::ExpectedKeyword(kw) => write!(f, "Expected keyword: {}", kw),
             Self::ExpectedToken { token } => {
                 write!(f, "Expected token: {}", token)
             }
@@ -116,5 +120,20 @@ impl fmt::Display for ParserErrorKind {
                 write!(f, "Error caused by one of the sub-errors: {:?}", sub_errs)
             }
         }
+    }
+}
+
+pub fn elevate_highest_error(diff: i32) -> impl Fn(Vec<ParserErrorInfo>) -> ParserErrorInfo {
+    move |errs| {
+        let level = errs
+            .iter()
+            .max_by_key(|e| e.get_level())
+            .map(|e| e.get_level())
+            .unwrap_or(0);
+        ParserErrorInfo::create(ParserErrorKind::SubErrorList(errs)).with_level(if level == 0 {
+            0
+        } else {
+            level + diff
+        })
     }
 }
