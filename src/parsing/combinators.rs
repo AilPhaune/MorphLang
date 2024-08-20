@@ -1,5 +1,7 @@
 use std::{char, rc::Rc};
 
+use crate::traits::has_len::HasLen;
+
 use super::{
     error::{ParserErrorInfo, ParserErrorKind},
     parser::Parser,
@@ -53,6 +55,15 @@ impl ParserInput {
     pub fn create(code: &str) -> Self {
         Self {
             code: Rc::new(code.to_string()),
+            current_index: 0,
+            current_line: 0,
+            current_line_index: 0,
+        }
+    }
+
+    pub fn create_from_string(code: String) -> Self {
+        Self {
+            code: Rc::new(code),
             current_index: 0,
             current_line: 0,
             current_line_index: 0,
@@ -114,8 +125,10 @@ impl ParserInput {
     pub fn get_before(&self) -> PositionInfo {
         PositionInfo::create(0, 0, 0).until(&PositionInfo::from_parser_input_position(self))
     }
+}
 
-    pub fn len(&self) -> usize {
+impl HasLen for ParserInput {
+    fn len(&self) -> usize {
         let l = self.code.len();
         if self.current_index >= l {
             0
@@ -124,7 +137,7 @@ impl ParserInput {
         }
     }
 
-    pub fn is_empty(&self) -> bool {
+    fn is_empty(&self) -> bool {
         self.current_index >= self.code.len()
     }
 }
@@ -828,6 +841,24 @@ pub fn any_of_boxes<InputType: Clone, ErrorType, OutputType>(
 pub fn parser_nothing<InputType: Clone, ErrorType>(
 ) -> impl Fn(&InputType) -> Result<(InputType, ()), ErrorType> {
     move |input| Ok((input.clone(), ()))
+}
+
+pub fn expect_consumed_all<InputType: Clone + HasLen, ErrorType, OutputType, P>(
+    parser: P,
+) -> impl Fn(&InputType) -> Result<(InputType, OutputType), Option<ErrorType>>
+where
+    P: Parser<InputType, ErrorType, OutputType>,
+{
+    move |input| match parser.run(input) {
+        Err(e) => Err(Some(e)),
+        Ok((remaining_input, parsed)) => {
+            if remaining_input.len() > 0 {
+                Err(None)
+            } else {
+                Ok((remaining_input, parsed))
+            }
+        }
+    }
 }
 
 #[cfg(test)]

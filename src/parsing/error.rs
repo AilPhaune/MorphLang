@@ -93,6 +93,7 @@ pub enum ParserErrorKind {
     ExpectedExpressionKind(ExpressionKind),
     SubErrorList(Vec<ParserErrorInfo>),
     InvalidLiteral,
+    UnexpectedInput,
 }
 
 impl fmt::Display for ParserErrorKind {
@@ -101,6 +102,7 @@ impl fmt::Display for ParserErrorKind {
             Self::Unknown => write!(f, "Unknown error"),
             Self::InvalidLiteral => write!(f, "Invalid literal"),
             Self::EndOfFile => write!(f, "End of input"),
+            Self::UnexpectedInput => write!(f, "Unexpected input"),
             Self::ExpectedToken { token } => {
                 write!(f, "Expected token: {}", token)
             }

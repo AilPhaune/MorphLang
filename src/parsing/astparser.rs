@@ -339,7 +339,10 @@ fn parse_expression_internal(
 
 #[cfg(test)]
 mod tests {
-    use crate::{assert_eq_parse_input, assert_is_error_print_ok, parsing::parser::run_parser};
+    use crate::{
+        assert_eq_parse_input, assert_is_error_print_ok, parsing::parser::run_parser,
+        traits::has_len::HasLen,
+    };
 
     use super::*;
 
