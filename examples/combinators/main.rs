@@ -13,7 +13,7 @@ use morphlang::{
         astparser::{
             parse_bin_literal_int, parse_decimal_literal_int, parse_expression,
             parse_hex_literal_int, parse_identifier, parse_literal_int, parse_oct_literal_int,
-            parse_proposition, parse_type, parse_type_base, ASTParserContext,
+            parse_proposition, parse_statement, parse_type, parse_type_base, ASTParserContext,
         },
         combinators::{delimited, parser_character, ParserInput},
         error::ParserErrorInfo,
@@ -189,7 +189,7 @@ fn print_ast(
     )?;
 
     let pinput = ParserInput::create(input);
-    match parse_expression(context.clone()).run(&pinput) {
+    match parse_statement(context.clone()).run(&pinput) {
         Err(e) => {
             writeln!(stdout, "\nError while parsing:")?;
             execute!(stdout, SetForegroundColor(Color::Red))?;
@@ -249,6 +249,12 @@ fn update_display(
         parse_expression(context.clone()),
         input,
         "expression: ",
+        len_counter,
+    )?;
+    write_combinator_output(
+        parse_statement(context.clone()),
+        input,
+        "statement: ",
         len_counter,
     )?;
 
