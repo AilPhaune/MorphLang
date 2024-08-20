@@ -387,7 +387,6 @@ pub fn parse_type_base(
             "u64" => ObjectTypeBase::UInt64,
             "bool" => ObjectTypeBase::Bool,
             "void" => ObjectTypeBase::Void,
-            "Proof" => ObjectTypeBase::Proof,
             _ => ObjectTypeBase::UserDefined(v),
         }),
         input,
@@ -413,32 +412,49 @@ pub fn parse_generics(
     }
 }
 
-pub fn parse_type(
+pub fn parse_type_object(
     context: Rc<ASTParserContext>,
 ) -> impl Fn(&ParserInput) -> Result<(ParserInput, Type), ParserErrorInfo> {
     move |input| {
         let (input, type_base) = parse_type_base(input)?;
+        let (input, generics) = parse_generics(&context, &input)?;
 
-        if type_base == ObjectTypeBase::Proof {
-            let (input, _) = run_parser(parser_character('<').increase_error_level(5), &input)?;
-            let (input, prop) = run_parser(
+        Ok((
+            input,
+            Type::Object {
+                base: type_base,
+                generics,
+            },
+        ))
+    }
+}
+
+pub fn parse_type_proposition(
+    context: Rc<ASTParserContext>,
+) -> impl Fn(&ParserInput) -> Result<(ParserInput, Type), ParserErrorInfo> {
+    move |input| {
+        run_parser(
+            map_parser_output(
                 parse_proposition(context.clone()).increase_error_level(5),
-                &input,
-            )?;
-            let (input, _) = run_parser(parser_character('>'), &input)?;
+                Type::Proposition,
+            ),
+            input,
+        )
+    }
+}
 
-            Ok((input, Type::Proof(prop)))
-        } else {
-            let (input, generics) = parse_generics(&context, &input)?;
-
-            Ok((
-                input,
-                Type::Object {
-                    base: type_base,
-                    generics,
-                },
-            ))
-        }
+pub fn parse_type(
+    context: Rc<ASTParserContext>,
+) -> impl Fn(&ParserInput) -> Result<(ParserInput, Type), ParserErrorInfo> {
+    move |input| {
+        let p = map_parser_error(
+            any_of_boxes(vec![
+                Box::from(parse_type_proposition(context.clone())),
+                Box::from(parse_type_object(context.clone())),
+            ]),
+            elevate_highest_error(2),
+        );
+        run_parser(p, input)
     }
 }
 

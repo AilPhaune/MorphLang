@@ -8,7 +8,6 @@ pub enum ObjectTypeBase {
     UInt64,
     Bool,
     Void,
-    Proof,
     UserDefined(Identifier),
 }
 
@@ -34,5 +33,5 @@ pub enum Type {
         base: ObjectTypeBase,
         generics: Vec<Type>,
     },
-    Proof(Proposition),
+    Proposition(Proposition),
 }
