@@ -6,15 +6,18 @@ use crossterm::{
     terminal::{self, ClearType},
     Result,
 };
-use morphlang::parsing::{
-    ast::{BinaryOperatorPrecedence, UnaryOperatorPrecedence},
-    astparser::{
-        parse_bin_literal_int, parse_decimal_literal_int, parse_expression, parse_hex_literal_int,
-        parse_literal_int, parse_oct_literal_int, ASTParserContext,
+use morphlang::{
+    default_context,
+    parsing::{
+        ast::{BinaryOperatorPrecedence, UnaryOperatorPrecedence},
+        astparser::{
+            parse_bin_literal_int, parse_decimal_literal_int, parse_expression,
+            parse_hex_literal_int, parse_literal_int, parse_oct_literal_int, ASTParserContext,
+        },
+        combinators::ParserInput,
+        error::ParserErrorInfo,
+        parser::Parser,
     },
-    combinators::ParserInput,
-    error::ParserErrorInfo,
-    parser::Parser,
 };
 use std::{
     io::{stdout, Write},
@@ -35,20 +38,7 @@ fn main() -> Result<()> {
     let mut cursor_pos: u16 = 0;
     let mut len_counter: usize = 0;
 
-    let context = Rc::from(ASTParserContext::create(
-        vec![
-            BinaryOperatorPrecedence::RightAssociative(1000, "**".to_string()),
-            BinaryOperatorPrecedence::LeftAssociative(100, '+'.to_string()),
-            BinaryOperatorPrecedence::LeftAssociative(100, '-'.to_string()),
-            BinaryOperatorPrecedence::LeftAssociative(500, '*'.to_string()),
-            BinaryOperatorPrecedence::LeftAssociative(500, '/'.to_string()),
-        ],
-        vec![
-            UnaryOperatorPrecedence::create(100, "+".to_string()),
-            UnaryOperatorPrecedence::create(100, "-".to_string()),
-            UnaryOperatorPrecedence::create(100, "~".to_string()),
-        ],
-    ));
+    let context = default_context!();
 
     update_display(&input, &mut cursor_pos, &context, &mut len_counter)?;
 
