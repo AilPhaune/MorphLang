@@ -29,6 +29,27 @@ impl ASTParserContext {
     }
 }
 
+#[macro_export]
+macro_rules! default_context {
+    () => {{
+        let ctx = Rc::from(ASTParserContext::create(
+            vec![
+                BinaryOperatorPrecedence::RightAssociative(1000, "**".to_string()),
+                BinaryOperatorPrecedence::LeftAssociative(100, '+'.to_string()),
+                BinaryOperatorPrecedence::LeftAssociative(100, '-'.to_string()),
+                BinaryOperatorPrecedence::LeftAssociative(500, '*'.to_string()),
+                BinaryOperatorPrecedence::LeftAssociative(500, '/'.to_string()),
+            ],
+            vec![
+                UnaryOperatorPrecedence::create(100, "+".to_string()),
+                UnaryOperatorPrecedence::create(100, "-".to_string()),
+                UnaryOperatorPrecedence::create(100, "~".to_string()),
+            ],
+        ));
+        ctx
+    }};
+}
+
 pub fn parse_decimal_literal_int(
     input: &ParserInput,
 ) -> Result<(ParserInput, Expression), ParserErrorInfo> {
@@ -322,30 +343,32 @@ mod tests {
 
     use super::*;
 
+    macro_rules! assert_is_expression_literal_int {
+        ($parsed: expr, $value: expr, $radix: expr) => {
+            if let Expression::LiteralInt(value, radix) = $parsed {
+                assert_eq!(value, $value);
+                assert_eq!(radix, $radix);
+            } else {
+                panic!(
+                    "Expected Expression::LiteralInt({},{}), got {:?}",
+                    $value, $radix, $parsed
+                );
+            }
+        };
+    }
+
     #[test]
     fn test_parse_literal_int() -> Result<(), ParserErrorInfo> {
         {
             let input = ParserInput::create("123 + 456");
             let (rest, parsed) = run_parser(parse_literal_int, &input).unwrap();
-            match parsed {
-                Expression::LiteralInt(v, radix) => {
-                    assert_eq!(v, "123");
-                    assert_eq!(radix, 10)
-                }
-                _ => panic!("Expected LiteralInt, got: {:?}", parsed),
-            }
+            assert_is_expression_literal_int!(parsed, "123", 10);
             assert_eq_parse_input!(rest, 3, 0, 3);
         }
         {
             let input = ParserInput::create("25_912_956 + 18");
             let (rest, parsed) = run_parser(parse_literal_int, &input).unwrap();
-            match parsed {
-                Expression::LiteralInt(v, radix) => {
-                    assert_eq!(v, "25912956");
-                    assert_eq!(radix, 10)
-                }
-                _ => panic!("Expected LiteralInt, got: {:?}", parsed),
-            }
+            assert_is_expression_literal_int!(parsed, "25912956", 10);
             assert_eq_parse_input!(rest, 10, 0, 10);
         }
         {
@@ -355,13 +378,7 @@ mod tests {
         {
             let input = ParserInput::create("0x1_fA_0E + 18");
             let (rest, parsed) = run_parser(parse_literal_int, &input).unwrap();
-            match parsed {
-                Expression::LiteralInt(v, radix) => {
-                    assert_eq!(v, "1fA0E");
-                    assert_eq!(radix, 16)
-                }
-                _ => panic!("Expected LiteralInt, got: {:?}", parsed),
-            }
+            assert_is_expression_literal_int!(parsed, "1fA0E", 16);
             assert_eq_parse_input!(rest, 9, 0, 9);
         }
         {
@@ -371,25 +388,13 @@ mod tests {
         {
             let input = ParserInput::create("0b1001+5");
             let (rest, parsed) = run_parser(parse_literal_int, &input).unwrap();
-            match parsed {
-                Expression::LiteralInt(v, radix) => {
-                    assert_eq!(v, "1001");
-                    assert_eq!(radix, 2)
-                }
-                _ => panic!("Expected LiteralInt, got: {:?}", parsed),
-            }
+            assert_is_expression_literal_int!(parsed, "1001", 2);
             assert_eq_parse_input!(rest, 6, 0, 6);
         }
         {
             let input = ParserInput::create("0b1100_1001 + 19");
             let (rest, parsed) = run_parser(parse_literal_int, &input).unwrap();
-            match parsed {
-                Expression::LiteralInt(v, radix) => {
-                    assert_eq!(v, "11001001");
-                    assert_eq!(radix, 2)
-                }
-                _ => panic!("Expected LiteralInt, got: {:?}", parsed),
-            }
+            assert_is_expression_literal_int!(parsed, "11001001", 2);
             assert_eq_parse_input!(rest, 11, 0, 11);
         }
         {
@@ -403,25 +408,14 @@ mod tests {
         {
             let input = ParserInput::create("015 + 19");
             let (rest, parsed) = run_parser(parse_literal_int, &input).unwrap();
-            match parsed {
-                Expression::LiteralInt(v, radix) => {
-                    assert_eq!(v, "015");
-                    assert_eq!(radix, 8)
-                }
-                _ => panic!("Expected LiteralInt, got: {:?}", parsed),
-            }
+
+            assert_is_expression_literal_int!(parsed, "015", 8);
             assert_eq_parse_input!(rest, 3, 0, 3);
         }
         {
             let input = ParserInput::create("0o4157 + 19");
             let (rest, parsed) = run_parser(parse_literal_int, &input).unwrap();
-            match parsed {
-                Expression::LiteralInt(v, radix) => {
-                    assert_eq!(v, "4157");
-                    assert_eq!(radix, 8)
-                }
-                _ => panic!("Expected LiteralInt, got: {:?}", parsed),
-            }
+            assert_is_expression_literal_int!(parsed, "4157", 8);
             assert_eq_parse_input!(rest, 6, 0, 6);
         }
         {
@@ -429,5 +423,139 @@ mod tests {
             assert_is_error_print_ok!(run_parser(parse_literal_int, &input));
         }
         Ok(())
+    }
+
+    #[test]
+    fn test_expression_with_literal_int() {
+        let context = default_context!();
+        {
+            let input = ParserInput::create("156");
+            let (rest, parsed) = run_parser(parse_expression(context.clone()), &input).unwrap();
+            assert!(rest.is_empty());
+            assert_is_expression_literal_int!(parsed, "156", 10);
+        }
+        {
+            let input = ParserInput::create("0x25");
+            let (rest, parsed) = run_parser(parse_expression(context.clone()), &input).unwrap();
+            assert!(rest.is_empty());
+            assert_is_expression_literal_int!(parsed, "25", 16);
+        }
+    }
+
+    #[test]
+    fn test_expression_with_binary_ops() {
+        let context = default_context!();
+        {
+            let input = ParserInput::create("15 + 2 * 5");
+            let (rest, parsed) = run_parser(parse_expression(context.clone()), &input).unwrap();
+            assert!(rest.is_empty());
+            if let Expression::BinaryOperation(lhs, rhs, op) = parsed.clone() {
+                assert_is_expression_literal_int!(*lhs, "15", 10);
+                assert_eq!(op, "+");
+                if let Expression::BinaryOperation(lhs, rhs, op) = *rhs {
+                    assert_is_expression_literal_int!(*lhs, "2", 10);
+                    assert_is_expression_literal_int!(*rhs, "5", 10);
+                    assert_eq!(op, "*");
+                } else {
+                    panic!("Invalid parsed expression: {:?}", parsed);
+                }
+            } else {
+                panic!("Invalid parsed expression: {:?}", parsed);
+            }
+        }
+        {
+            let input = ParserInput::create("(63 - 7) * 0x11");
+            let (rest, parsed) = run_parser(parse_expression(context.clone()), &input).unwrap();
+            assert!(rest.is_empty());
+            if let Expression::BinaryOperation(lhs, rhs, op) = parsed.clone() {
+                assert_is_expression_literal_int!(*rhs, "11", 16);
+                assert_eq!(op, "*");
+                if let Expression::BinaryOperation(lhs, rhs, op) = *lhs {
+                    assert_is_expression_literal_int!(*lhs, "63", 10);
+                    assert_is_expression_literal_int!(*rhs, "7", 10);
+                    assert_eq!(op, "-");
+                } else {
+                    panic!("Invalid parsed expression: {:?}", parsed);
+                }
+            } else {
+                panic!("Invalid parsed expression: {:?}", parsed);
+            }
+        }
+        {
+            let input = ParserInput::create("(63 + 7) * 0x11");
+            let (rest, parsed) = run_parser(parse_expression(context.clone()), &input).unwrap();
+            assert!(rest.is_empty());
+            if let Expression::BinaryOperation(lhs, rhs, op) = parsed.clone() {
+                assert_is_expression_literal_int!(*rhs, "11", 16);
+                assert_eq!(op, "*");
+                if let Expression::BinaryOperation(lhs, rhs, op) = *lhs {
+                    assert_is_expression_literal_int!(*lhs, "63", 10);
+                    assert_is_expression_literal_int!(*rhs, "7", 10);
+                    assert_eq!(op, "+");
+                } else {
+                    panic!("Invalid parsed expression: {:?}", parsed);
+                }
+            } else {
+                panic!("Invalid parsed expression: {:?}", parsed);
+            }
+        }
+    }
+
+    #[test]
+    fn test_expression_with_unary_ops() {
+        let context = default_context!();
+        {
+            let input = ParserInput::create("-71");
+            let (rest, parsed) = run_parser(parse_expression(context.clone()), &input).unwrap();
+            assert!(rest.is_empty());
+            if let Expression::UnaryOperation(expr, op) = parsed {
+                assert_is_expression_literal_int!(*expr, "71", 10);
+                assert_eq!(op, "-");
+            } else {
+                panic!("Invalid parsed expression: {:?}", parsed);
+            }
+        }
+        {
+            let input = ParserInput::create("--71");
+            let (rest, parsed) = run_parser(parse_expression(context.clone()), &input).unwrap();
+            assert!(rest.is_empty());
+            if let Expression::UnaryOperation(expr, op) = parsed.clone() {
+                assert_eq!(op, "-");
+                if let Expression::UnaryOperation(expr, op) = *expr {
+                    assert_is_expression_literal_int!(*expr, "71", 10);
+                    assert_eq!(op, "-");
+                } else {
+                    panic!("Invalid parsed expression: {:?}", parsed);
+                }
+            } else {
+                panic!("Invalid parsed expression: {:?}", parsed);
+            }
+        }
+        {
+            let input = ParserInput::create("-~+-0b1101_1000");
+            let (rest, parsed) = run_parser(parse_expression(context.clone()), &input).unwrap();
+            assert!(rest.is_empty());
+            if let Expression::UnaryOperation(expr, op) = parsed.clone() {
+                assert_eq!(op, "-");
+                if let Expression::UnaryOperation(expr, op) = *expr {
+                    assert_eq!(op, "~");
+                    if let Expression::UnaryOperation(expr, op) = *expr {
+                        assert_eq!(op, "+");
+                        if let Expression::UnaryOperation(expr, op) = *expr {
+                            assert_eq!(op, "-");
+                            assert_is_expression_literal_int!(*expr, "11011000", 2);
+                        } else {
+                            panic!("Invalid parsed expression: {:?}", parsed);
+                        }
+                    } else {
+                        panic!("Invalid parsed expression: {:?}", parsed);
+                    }
+                } else {
+                    panic!("Invalid parsed expression: {:?}", parsed);
+                }
+            } else {
+                panic!("Invalid parsed expression: {:?}", parsed);
+            }
+        }
     }
 }
