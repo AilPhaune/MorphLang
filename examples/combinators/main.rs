@@ -3,7 +3,7 @@ use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
     style::{Color, ResetColor, SetForegroundColor},
-    terminal::{self, ClearType},
+    terminal::{self, Clear, ClearType},
     Result,
 };
 use morphlang::{
@@ -41,7 +41,14 @@ fn main() -> Result<()> {
 
     let context = default_context!();
 
-    update_display(&input, &mut cursor_pos, &context, &mut len_counter)?;
+    let mut min_err_level = 1;
+    update_display(
+        &input,
+        &mut cursor_pos,
+        &context,
+        &mut len_counter,
+        min_err_level,
+    )?;
 
     loop {
         if event::poll(std::time::Duration::from_millis(1))? {
@@ -50,6 +57,26 @@ fn main() -> Result<()> {
                     continue;
                 }
                 match key_event.code {
+                    KeyCode::Up => {
+                        min_err_level += 1;
+                        update_display(
+                            &input,
+                            &mut cursor_pos,
+                            &context,
+                            &mut len_counter,
+                            min_err_level,
+                        )?;
+                    }
+                    KeyCode::Down => {
+                        min_err_level -= 1;
+                        update_display(
+                            &input,
+                            &mut cursor_pos,
+                            &context,
+                            &mut len_counter,
+                            min_err_level,
+                        )?;
+                    }
                     KeyCode::Char(c) => {
                         if (c == 'C' || c == 'c')
                             && key_event.modifiers.contains(KeyModifiers::CONTROL)
@@ -66,7 +93,13 @@ fn main() -> Result<()> {
                         }
                         input.insert(cursor_pos as usize, c);
                         cursor_pos += 1;
-                        update_display(&input, &mut cursor_pos, &context, &mut len_counter)?;
+                        update_display(
+                            &input,
+                            &mut cursor_pos,
+                            &context,
+                            &mut len_counter,
+                            min_err_level,
+                        )?;
                     }
                     KeyCode::Left => {
                         let mut last_char = '\0';
@@ -129,7 +162,13 @@ fn main() -> Result<()> {
                                 break;
                             }
                         }
-                        update_display(&input, &mut cursor_pos, &context, &mut len_counter)?;
+                        update_display(
+                            &input,
+                            &mut cursor_pos,
+                            &context,
+                            &mut len_counter,
+                            min_err_level,
+                        )?;
                     }
                     KeyCode::Delete => {
                         let mut last_char = '\0';
@@ -145,10 +184,22 @@ fn main() -> Result<()> {
                                 break;
                             }
                         }
-                        update_display(&input, &mut cursor_pos, &context, &mut len_counter)?;
+                        update_display(
+                            &input,
+                            &mut cursor_pos,
+                            &context,
+                            &mut len_counter,
+                            min_err_level,
+                        )?;
                     }
                     KeyCode::Enter => {
-                        print_ast(&input, &mut cursor_pos, &context, &mut len_counter)?;
+                        print_ast(
+                            &input,
+                            &mut cursor_pos,
+                            &context,
+                            &mut len_counter,
+                            min_err_level,
+                        )?;
                     }
                     _ => {}
                 }
@@ -179,6 +230,7 @@ fn print_ast(
     cursor_pos: &mut u16,
     context: &Rc<ASTParserContext>,
     len_counter: &mut usize,
+    min_err_level: i32,
 ) -> Result<()> {
     let mut stdout = stdout();
 
@@ -193,7 +245,7 @@ fn print_ast(
         Err(e) => {
             writeln!(stdout, "\nError while parsing:")?;
             execute!(stdout, SetForegroundColor(Color::Red))?;
-            write!(stdout, "{:?}", e)
+            write!(stdout, "{}", e.pretty_print(0, min_err_level))
         }
         Ok((_, ast)) => {
             writeln!(stdout, "\nAST:")?;
@@ -204,7 +256,7 @@ fn print_ast(
 
     execute!(stdout, ResetColor)?;
 
-    update_display(input, cursor_pos, context, len_counter)?;
+    update_display(input, cursor_pos, context, len_counter, min_err_level)?;
 
     stdout.flush()?;
     Ok(())
@@ -215,10 +267,28 @@ fn update_display(
     cursor_pos: &mut u16,
     context: &Rc<ASTParserContext>,
     len_counter: &mut usize,
+    min_err_level: i32,
 ) -> Result<()> {
     let mut stdout = stdout();
 
-    execute!(stdout, cursor::MoveTo(0, 0))?;
+    execute!(
+        stdout,
+        cursor::MoveTo(0, 0),
+        SetForegroundColor(Color::Yellow)
+    )?;
+
+    write!(
+        stdout,
+        "Error formating: minimum error level = {}",
+        min_err_level
+    )?;
+
+    execute!(
+        stdout,
+        Clear(ClearType::UntilNewLine),
+        cursor::MoveToNextLine(1),
+        ResetColor
+    )?;
 
     if *cursor_pos as usize > input.len() {
         *cursor_pos = input.len() as u16;
