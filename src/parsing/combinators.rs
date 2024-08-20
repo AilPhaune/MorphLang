@@ -302,6 +302,9 @@ where
     P: Parser<ParserInput, ErrorType, OutputType>,
 {
     move |input| {
+        if input.is_empty() {
+            return parser.run(input);
+        }
         let (remaining_input, _) = repeat_at_least_0(parser_character_predicate(
             char::is_whitespace,
             "WHITESPACE",
@@ -910,6 +913,14 @@ where
     move |input| match parser.run(input) {
         Ok((remaining_input, parsed)) => Ok((remaining_input, Some(parsed))),
         Err(_) => Ok((input.clone(), None)),
+    }
+}
+
+pub fn expect_input(input: &ParserInput) -> Result<(), ParserErrorInfo> {
+    if input.is_empty() {
+        Err(ParserErrorInfo::create(ParserErrorKind::EndOfFile).with_level(1))
+    } else {
+        Ok(())
     }
 }
 

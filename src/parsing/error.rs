@@ -1,4 +1,5 @@
 use core::fmt;
+use std::rc::Rc;
 
 use super::ast::ExpressionKind;
 
@@ -7,6 +8,7 @@ pub struct ParserErrorInfo {
     kind: ParserErrorKind,
     info: Option<String>,
     level: i32,
+    cause: Option<Rc<ParserErrorInfo>>,
 }
 
 impl fmt::Display for ParserErrorInfo {
@@ -28,6 +30,7 @@ impl ParserErrorInfo {
             kind,
             info: None,
             level: 0,
+            cause: None,
         }
     }
 
@@ -40,6 +43,7 @@ impl ParserErrorInfo {
             kind: self.kind.clone(),
             info: Some(info),
             level: self.level,
+            cause: self.cause.clone(),
         }
     }
 
@@ -52,6 +56,7 @@ impl ParserErrorInfo {
             kind: self.kind.clone(),
             info: self.info.clone(),
             level,
+            cause: self.cause.clone(),
         }
     }
 
@@ -68,7 +73,25 @@ impl ParserErrorInfo {
             } else {
                 self.level + diff
             },
+            cause: self.cause.clone(),
         }
+    }
+
+    pub fn set_cause(&mut self, cause: Option<Rc<ParserErrorInfo>>) {
+        self.cause = cause;
+    }
+
+    pub fn with_cause(&self, cause: Option<Rc<ParserErrorInfo>>) -> Self {
+        Self {
+            kind: self.kind.clone(),
+            info: self.info.clone(),
+            level: self.level,
+            cause: cause.clone(),
+        }
+    }
+
+    pub fn with_cause0(&self, cause: &ParserErrorInfo) -> Self {
+        self.with_cause(Some(Rc::from(cause.clone())))
     }
 
     pub fn get_level(&self) -> i32 {
@@ -81,6 +104,43 @@ impl ParserErrorInfo {
 
     pub fn get_info(&self) -> &Option<String> {
         &self.info
+    }
+
+    pub fn get_cause(&self) -> &Option<Rc<ParserErrorInfo>> {
+        &self.cause
+    }
+
+    pub fn pretty_print(&self, indent_level: usize, min_level: i32) -> String {
+        let mut result = String::new();
+        let indent = " ".repeat(indent_level * 2);
+
+        result.push_str(&format!(
+            "{}Error[Level {}]: {}\n",
+            indent, self.level, self.kind
+        ));
+
+        if let Some(info) = &self.info {
+            result.push_str(&format!("{}  Info: {}\n", indent, info));
+        }
+
+        if let ParserErrorKind::SubErrorList(errors) = &self.kind {
+            for (i, sub_error) in errors.iter().enumerate() {
+                if sub_error.get_level() < min_level {
+                    continue;
+                }
+                result.push_str(&format!("{}  SubError {}:\n", indent, i + 1));
+                result.push_str(&sub_error.pretty_print(indent_level + 2, min_level));
+            }
+        }
+
+        if let Some(cause) = &self.cause {
+            if cause.get_level() >= min_level {
+                result.push_str(&format!("{}Caused by:\n", indent));
+                result.push_str(&cause.pretty_print(indent_level + 2, min_level));
+            }
+        }
+
+        result
     }
 }
 
@@ -96,15 +156,17 @@ pub enum ParserErrorKind {
     UnexpectedInput,
     ExpectedIdentifier,
     ExpectedKeyword(String),
+    Expected(String),
 }
 
 impl fmt::Display for ParserErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self {
             Self::Unknown => write!(f, "Unknown error"),
+            Self::Expected(s) => write!(f, "Expected {}", s),
             Self::InvalidLiteral => write!(f, "Invalid literal"),
             Self::ExpectedIdentifier => write!(f, "Expected identifier"),
-            Self::EndOfFile => write!(f, "End of input"),
+            Self::EndOfFile => write!(f, "Unexpected end of input"),
             Self::UnexpectedInput => write!(f, "Unexpected input"),
             Self::ExpectedKeyword(kw) => write!(f, "Expected keyword: {}", kw),
             Self::ExpectedToken { token } => {
@@ -116,8 +178,8 @@ impl fmt::Display for ParserErrorKind {
             Self::ExpectedExpressionKind(kind) => {
                 write!(f, "Expected expression kind {}", kind)
             }
-            Self::SubErrorList(sub_errs) => {
-                write!(f, "Error caused by one of the sub-errors: {:?}", sub_errs)
+            Self::SubErrorList(_) => {
+                write!(f, "Error caused by sub-error")
             }
         }
     }

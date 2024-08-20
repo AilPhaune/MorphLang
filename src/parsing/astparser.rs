@@ -8,10 +8,10 @@ use super::{
         UnaryOperatorPrecedence,
     },
     combinators::{
-        and, and_then1, and_then2, any_of, any_of_boxes, delimited, map_parser, map_parser_error,
-        map_parser_output, not, parse_then_restart, parser_character, parser_character_predicate,
-        parser_nothing, parser_token, repeat_at_least_1, skip_whitespaces, ParserInput,
-        PositionInfo,
+        and, and_then1, and_then2, any_of, any_of_boxes, delimited, expect_input, map_parser,
+        map_parser_error, map_parser_output, not, parse_then_restart, parser_character,
+        parser_character_predicate, parser_nothing, parser_token, repeat_at_least_1,
+        skip_whitespaces, ParserInput, PositionInfo,
     },
     error::{elevate_highest_error, ParserErrorInfo, ParserErrorKind},
     parser::{run_parser, Parser},
@@ -52,6 +52,10 @@ pub trait IncreaseErrorLevel<InputType: Clone, OutputType> {
         &self,
         diff: i32,
     ) -> impl Fn(&InputType) -> Result<(InputType, OutputType), ParserErrorInfo>;
+    fn force_increase_error_level(
+        &self,
+        diff: i32,
+    ) -> impl Fn(&InputType) -> Result<(InputType, OutputType), ParserErrorInfo>;
 }
 
 impl<InputType: Clone, OutputType, P> IncreaseErrorLevel<InputType, OutputType> for P
@@ -63,6 +67,16 @@ where
         diff: i32,
     ) -> impl Fn(&InputType) -> Result<(InputType, OutputType), ParserErrorInfo> {
         move |input| self.run(input).map_err(|e| e.with_increased_level(diff))
+    }
+
+    fn force_increase_error_level(
+        &self,
+        diff: i32,
+    ) -> impl Fn(&InputType) -> Result<(InputType, OutputType), ParserErrorInfo> {
+        move |input| {
+            self.run(input)
+                .map_err(|e| e.with_level(e.get_level() + diff))
+        }
     }
 }
 
@@ -333,8 +347,12 @@ fn parse_expression_internal(
                 let (_, next_input) = input
                     .advance_by(op_str.len())
                     .ok_or(ParserErrorInfo::create(ParserErrorKind::EndOfFile))?;
-                let (next_input, rhs) =
-                    parse_expression_internal(&next_input, context, found_prec)?;
+                let (next_input, rhs) = parse_expression_internal(&next_input, context, found_prec)
+                    .map_err(|e| {
+                        ParserErrorInfo::create(ParserErrorKind::EndOfFile)
+                            .with_cause0(&e)
+                            .with_level(e.get_level() + 5)
+                    })?;
                 lhs = Expression::BinaryOperation(Box::new(lhs), Box::new(rhs), op_str);
                 input = next_input;
             } else if let Some("left") = found_assoc {
@@ -342,7 +360,13 @@ fn parse_expression_internal(
                     .advance_by(op_str.len())
                     .ok_or(ParserErrorInfo::create(ParserErrorKind::EndOfFile))?;
                 let (next_input, rhs) =
-                    parse_expression_internal(&next_input, context, found_prec + 1)?;
+                    parse_expression_internal(&next_input, context, found_prec + 1).map_err(
+                        |e| {
+                            ParserErrorInfo::create(ParserErrorKind::EndOfFile)
+                                .with_cause0(&e)
+                                .with_level(e.get_level() + 5)
+                        },
+                    )?;
                 lhs = Expression::BinaryOperation(Box::new(lhs), Box::new(rhs), op_str);
                 input = next_input;
             } else {
@@ -359,10 +383,13 @@ fn parse_expression_internal(
 pub fn parse_identifier(input: &ParserInput) -> Result<(ParserInput, Identifier), ParserErrorInfo> {
     run_parser(
         and_then2(
-            parse_then_restart(parser_character_predicate(
-                char::is_alphabetic,
-                "ALPHABETIC",
-            )),
+            map_parser_error(
+                parse_then_restart(parser_character_predicate(
+                    char::is_alphabetic,
+                    "ALPHABETIC",
+                )),
+                |e| ParserErrorInfo::create(ParserErrorKind::ExpectedIdentifier).with_cause0(&e),
+            ),
             map_parser(
                 repeat_at_least_1(parser_character_predicate(
                     |c| c == '_' || c.is_alphanumeric(),
@@ -379,6 +406,7 @@ pub fn parse_identifier(input: &ParserInput) -> Result<(ParserInput, Identifier)
 pub fn parse_type_base(
     input: &ParserInput,
 ) -> Result<(ParserInput, ObjectTypeBase), ParserErrorInfo> {
+    expect_input(input)?;
     run_parser(
         map_parser_output(parse_identifier, |v| match v.0.as_str() {
             "i32" => ObjectTypeBase::Int32,
@@ -416,7 +444,8 @@ pub fn parse_type_object(
     context: Rc<ASTParserContext>,
 ) -> impl Fn(&ParserInput) -> Result<(ParserInput, Type), ParserErrorInfo> {
     move |input| {
-        let (input, type_base) = parse_type_base(input)?;
+        expect_input(input)?;
+        let (input, type_base) = skip_whitespaces(parse_type_base).run(input)?;
         let (input, generics) = parse_generics(&context, &input)?;
 
         Ok((
@@ -433,6 +462,7 @@ pub fn parse_type_proposition(
     context: Rc<ASTParserContext>,
 ) -> impl Fn(&ParserInput) -> Result<(ParserInput, Type), ParserErrorInfo> {
     move |input| {
+        expect_input(input)?;
         run_parser(
             map_parser_output(
                 parse_proposition(context.clone()).increase_error_level(5),
@@ -463,7 +493,10 @@ pub fn parse_keyword(
 ) -> impl Fn(&ParserInput) -> Result<(ParserInput, PositionInfo), ParserErrorInfo> {
     move |input| {
         let start = PositionInfo::from_parser_input_position(input);
-        let (input, ident) = parse_identifier(input)?;
+        let (input, ident) = parse_identifier(input).map_err(|e| {
+            ParserErrorInfo::create(ParserErrorKind::Expected(format!("Keyword {}", kw)))
+                .with_level(e.get_level())
+        })?;
         if ident.0 != kw {
             Err(ParserErrorInfo::create(ParserErrorKind::ExpectedKeyword(
                 kw.clone(),
@@ -479,10 +512,18 @@ pub fn parse_proposition_property_of_expression(
     context: Rc<ASTParserContext>,
 ) -> impl Fn(&ParserInput) -> Result<(ParserInput, Proposition), ParserErrorInfo> {
     move |input| {
+        expect_input(input)?;
         let (input, expr) = parse_expression(context.clone()).run(input)?;
-        let (input, _) = skip_whitespaces(parse_keyword(KeyWords::kw_is())).run(&input)?;
-        let (input, property) =
-            skip_whitespaces(parse_identifier.increase_error_level(5)).run(&input)?;
+        let (input, _) =
+            skip_whitespaces(parse_keyword(KeyWords::kw_is()).force_increase_error_level(1))
+                .run(&input)?;
+        let (input, property) = skip_whitespaces(parse_identifier.force_increase_error_level(5))
+            .run(&input)
+            .map_err(|e| {
+                ParserErrorInfo::create(ParserErrorKind::Expected("property name".to_string()))
+                    .with_level(e.get_level())
+                    .with_cause0(&e)
+            })?;
 
         Ok((
             input,
@@ -495,6 +536,7 @@ pub fn parse_proposition(
     context: Rc<ASTParserContext>,
 ) -> impl Fn(&ParserInput) -> Result<(ParserInput, Proposition), ParserErrorInfo> {
     move |input| {
+        expect_input(input)?;
         run_parser(
             skip_whitespaces(map_parser_error(
                 any_of(vec![parse_proposition_property_of_expression(
@@ -512,7 +554,8 @@ pub fn parse_statement_variable_declaration(
 ) -> impl Fn(&ParserInput) -> Result<(ParserInput, Statement), ParserErrorInfo> {
     move |input| {
         let (input, _) = parse_keyword(KeyWords::kw_let()).run(input)?;
-        let (mut input, name_ident) = skip_whitespaces(parse_identifier).run(&input)?;
+        let (mut input, name_ident) =
+            skip_whitespaces(parse_identifier.force_increase_error_level(5)).run(&input)?;
 
         let mut var_type = None;
 
@@ -530,9 +573,34 @@ pub fn parse_statement_variable_declaration(
             ));
         }
 
-        let (input, _) = skip_whitespaces(parser_character('=')).run(&input)?;
-        let (input, expr) = skip_whitespaces(parse_expression(context.clone())).run(&input)?;
-        let (input, _) = skip_whitespaces(parser_character(';')).run(&input)?;
+        let (input, _) = skip_whitespaces(parser_character('='))
+            .force_increase_error_level(2)
+            .run(&input)
+            .map_err(|e| {
+                ParserErrorInfo::create(ParserErrorKind::Expected(
+                    if var_type.is_none() {
+                        "';' or type hint or variable initialization"
+                    } else {
+                        "';' or variable initialization"
+                    }
+                    .to_string(),
+                ))
+                .with_level(e.get_level())
+            })?;
+        let (input, expr) =
+            skip_whitespaces(parse_expression(context.clone()).force_increase_error_level(5))
+                .run(&input)
+                .map_err(|e| {
+                    ParserErrorInfo::create(ParserErrorKind::Expected("expression".to_string()))
+                        .with_level(e.get_level())
+                })?;
+        let (input, _) = skip_whitespaces(parser_character(';'))
+            .force_increase_error_level(2)
+            .run(&input)
+            .map_err(|e| {
+                ParserErrorInfo::create(ParserErrorKind::Expected("';'".to_string()))
+                    .with_level(e.get_level())
+            })?;
 
         Ok((
             input,
@@ -545,6 +613,7 @@ pub fn parse_statement(
     context: Rc<ASTParserContext>,
 ) -> impl Fn(&ParserInput) -> Result<(ParserInput, Statement), ParserErrorInfo> {
     move |input| {
+        expect_input(input)?;
         run_parser(
             map_parser_error(
                 any_of_boxes(vec![
