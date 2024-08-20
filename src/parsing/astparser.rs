@@ -4,7 +4,8 @@ use crate::type_checker::types::{BoolProperty, ObjectTypeBase, Proposition, Type
 
 use super::{
     ast::{
-        BinaryOperatorPrecedence, Expression, ExpressionKind, Identifier, UnaryOperatorPrecedence,
+        BinaryOperatorPrecedence, Expression, ExpressionKind, Identifier, Statement,
+        UnaryOperatorPrecedence,
     },
     combinators::{
         and, and_then1, and_then2, any_of, any_of_boxes, delimited, map_parser, map_parser_error,
@@ -31,6 +32,18 @@ impl ASTParserContext {
             binary_operators,
             unary_operators,
         }
+    }
+}
+
+pub struct KeyWords;
+
+impl KeyWords {
+    pub fn kw_is() -> String {
+        "is".to_owned()
+    }
+
+    pub fn kw_let() -> String {
+        "let".to_owned()
     }
 }
 
@@ -451,7 +464,7 @@ pub fn parse_proposition_property_of_expression(
 ) -> impl Fn(&ParserInput) -> Result<(ParserInput, Proposition), ParserErrorInfo> {
     move |input| {
         let (input, expr) = parse_expression(context.clone()).run(input)?;
-        let (input, _) = skip_whitespaces(parse_keyword("is".to_string())).run(&input)?;
+        let (input, _) = skip_whitespaces(parse_keyword(KeyWords::kw_is())).run(&input)?;
         let (input, property) =
             skip_whitespaces(parse_identifier.increase_error_level(5)).run(&input)?;
 
@@ -473,6 +486,59 @@ pub fn parse_proposition(
                 )]),
                 elevate_highest_error(2),
             )),
+            input,
+        )
+    }
+}
+
+pub fn parse_statement_variable_declaration(
+    context: Rc<ASTParserContext>,
+) -> impl Fn(&ParserInput) -> Result<(ParserInput, Statement), ParserErrorInfo> {
+    move |input| {
+        let (input, _) = parse_keyword(KeyWords::kw_let()).run(input)?;
+        let (mut input, name_ident) = skip_whitespaces(parse_identifier).run(&input)?;
+
+        let mut var_type = None;
+
+        if let Ok((new_input, _)) = skip_whitespaces(parser_character(':')).run(&input) {
+            let (new_input, parsed_type) =
+                skip_whitespaces(parse_type(context.clone())).run(&new_input)?;
+            var_type = Some(parsed_type);
+            input = new_input;
+        }
+
+        if let Ok((new_input, _)) = skip_whitespaces(parser_character(';')).run(&input) {
+            return Ok((
+                new_input,
+                Statement::VarDeclaration(name_ident, var_type, None),
+            ));
+        }
+
+        let (input, _) = skip_whitespaces(parser_character('=')).run(&input)?;
+        let (input, expr) = skip_whitespaces(parse_expression(context.clone())).run(&input)?;
+        let (input, _) = skip_whitespaces(parser_character(';')).run(&input)?;
+
+        Ok((
+            input,
+            Statement::VarDeclaration(name_ident, var_type, Some(Box::new(expr))),
+        ))
+    }
+}
+
+pub fn parse_statement(
+    context: Rc<ASTParserContext>,
+) -> impl Fn(&ParserInput) -> Result<(ParserInput, Statement), ParserErrorInfo> {
+    move |input| {
+        run_parser(
+            map_parser_error(
+                any_of_boxes(vec![
+                    Box::from(parse_statement_variable_declaration(context.clone())),
+                    Box::from(map_parser_output(parse_expression(context.clone()), |v| {
+                        Statement::Expression(v)
+                    })),
+                ]),
+                elevate_highest_error(2),
+            ),
             input,
         )
     }

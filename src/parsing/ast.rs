@@ -43,6 +43,7 @@ pub enum Expression {
 #[derive(Debug, Clone)]
 pub enum Statement {
     VarDeclaration(Identifier, Option<Type>, Option<Box<Expression>>),
+    Expression(Expression),
 }
 
 #[derive(Debug, Clone, Copy)]
