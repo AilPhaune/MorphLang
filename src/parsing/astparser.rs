@@ -1,10 +1,13 @@
 use std::rc::Rc;
 
-use crate::type_checker::types::{BoolProperty, ObjectTypeBase, Proposition, Type};
+use crate::{
+    traits::has_len::HasLen,
+    type_checker::types::{BoolProperty, ObjectTypeBase, Proposition, Type},
+};
 
 use super::{
     ast::{
-        BinaryOperatorPrecedence, Expression, ExpressionKind, Identifier, Statement,
+        BinaryOperatorPrecedence, Declaration, Expression, ExpressionKind, Identifier, Statement,
         UnaryOperatorPrecedence,
     },
     combinators::{
@@ -44,6 +47,14 @@ impl KeyWords {
 
     pub fn kw_let() -> String {
         "let".to_owned()
+    }
+
+    pub fn kw_namespace() -> String {
+        "namespace".to_owned()
+    }
+
+    pub fn kw_fn() -> String {
+        "fn".to_owned()
     }
 }
 
@@ -407,8 +418,8 @@ pub fn parse_identifier(input: &ParserInput) -> Result<(ParserInput, Identifier)
             ),
             map_parser(
                 repeat_at_least_1(parser_character_predicate(
-                    |c| c == '_' || c.is_alphanumeric(),
-                    "ALPHANUMERIC_OR_UNDERSCORE",
+                    |c| c == '_' || c.is_alphanumeric() || c.is_ascii_digit(),
+                    "ALPHANUMERIC_OR_DIGIT_OR_UNDERSCORE",
                 )),
                 |v| Identifier::create(v.iter().collect()),
                 |_| ParserErrorInfo::create(ParserErrorKind::ExpectedIdentifier),
@@ -446,6 +457,7 @@ pub fn parse_generics(
                 delimited(
                     skip_whitespaces(parser_character(',')),
                     skip_whitespaces(parse_type(context.clone())),
+                    true,
                 ),
                 skip_whitespaces(parser_character('>')),
             ),
@@ -565,9 +577,9 @@ pub fn parse_proposition(
     }
 }
 
-pub fn parse_statement_variable_declaration(
+pub fn parse_variable_declaration(
     context: Rc<ASTParserContext>,
-) -> impl Fn(&ParserInput) -> Result<(ParserInput, Statement), ParserErrorInfo> {
+) -> impl Fn(&ParserInput) -> Result<(ParserInput, Declaration), ParserErrorInfo> {
     move |input| {
         let (input, _) = parse_keyword(KeyWords::kw_let()).run(input)?;
         let (mut input, name_ident) =
@@ -583,10 +595,7 @@ pub fn parse_statement_variable_declaration(
         }
 
         if let Ok((new_input, _)) = skip_whitespaces(parser_character(';')).run(&input) {
-            return Ok((
-                new_input,
-                Statement::VarDeclaration(name_ident, var_type, None),
-            ));
+            return Ok((new_input, Declaration::Variable(name_ident, var_type, None)));
         }
 
         let (input, _) = skip_whitespaces(parser_character('='))
@@ -613,7 +622,7 @@ pub fn parse_statement_variable_declaration(
 
         Ok((
             input,
-            Statement::VarDeclaration(name_ident, var_type, Some(Box::new(expr))),
+            Declaration::Variable(name_ident, var_type, Some(Box::new(expr))),
         ))
     }
 }
@@ -633,6 +642,146 @@ where
     )
 }
 
+pub fn parse_program(
+    context: Rc<ASTParserContext>,
+) -> impl Fn(&ParserInput) -> Result<(ParserInput, Declaration), ParserErrorInfo> {
+    move |input| {
+        let (rest, namespace) = parse_namespace(context.clone()).run(input)?;
+        let (rest, _) = skip_whitespaces(parser_nothing()).run(&rest)?;
+        if rest.is_empty() {
+            Ok((rest, namespace))
+        } else {
+            Err(ParserErrorInfo::create(ParserErrorKind::Expected(
+                "End of file".to_string(),
+            )))
+        }
+    }
+}
+
+pub fn parse_namespace(
+    context: Rc<ASTParserContext>,
+) -> impl Fn(&ParserInput) -> Result<(ParserInput, Declaration), ParserErrorInfo> {
+    move |input| {
+        let (rest, _) = skip_whitespaces(parse_keyword(KeyWords::kw_namespace())).run(input)?;
+        let (rest, name) = skip_whitespaces(parse_identifier)
+            .force_increase_error_level(5)
+            .run(&rest)?;
+        let (mut rest, _) = skip_whitespaces(parser_character('{'))
+            .force_increase_error_level(5)
+            .run(&rest)?;
+        let mut decls = Vec::new();
+        loop {
+            (rest, _) = skip_whitespaces(parser_nothing()).run(&rest)?;
+            if rest.is_empty() {
+                return Err(ParserErrorInfo::create(ParserErrorKind::EndOfFile));
+            }
+            match parser_character('}').run(&rest) {
+                Err(_) => {}
+                Ok((remaining, _)) => {
+                    return Ok((remaining, Declaration::Namespace(name, decls)));
+                }
+            }
+            let parsed;
+            (rest, parsed) = parse_namespace_declaration(context.clone()).run(&rest)?;
+            decls.push(parsed);
+        }
+    }
+}
+
+pub fn parse_function_parameter(
+    context: Rc<ASTParserContext>,
+) -> impl Fn(&ParserInput) -> Result<(ParserInput, (Identifier, Type)), ParserErrorInfo> {
+    move |input| {
+        let (rest, name) = skip_whitespaces(parse_identifier).run(input)?;
+        let (rest, _) = skip_whitespaces(parser_character(':'))
+            .force_increase_error_level(1)
+            .run(&rest)?;
+        let (rest, ptype) = parse_type(context.clone())
+            .force_increase_error_level(2)
+            .run(&rest)?;
+
+        Ok((rest, (name, ptype)))
+    }
+}
+
+pub fn parse_function_declaration(
+    context: Rc<ASTParserContext>,
+) -> impl Fn(&ParserInput) -> Result<(ParserInput, Declaration), ParserErrorInfo> {
+    move |input| {
+        let (rest, _) = skip_whitespaces(parse_keyword(KeyWords::kw_fn())).run(input)?;
+
+        let (rest, fn_name) = skip_whitespaces(parse_identifier)
+            .force_increase_error_level(5)
+            .run(&rest)?;
+
+        let (rest, _) = skip_whitespaces(parser_character('('))
+            .force_increase_error_level(5)
+            .run(&rest)?;
+
+        let (rest, args) = delimited(
+            and_then1(
+                skip_whitespaces(parser_character(',')),
+                skip_whitespaces(parser_nothing()),
+            ),
+            parse_function_parameter(context.clone()),
+            false,
+        )
+        .run(&rest)?;
+
+        let (rest, _) = skip_whitespaces(parser_character(')'))
+            .force_increase_error_level(5)
+            .run(&rest)?;
+
+        let (rest, rtype) = match skip_whitespaces(parser_character(':')).run(&rest) {
+            Err(_) => (rest, None),
+            Ok((rest, _)) => map_parser_output(skip_whitespaces(parse_type(context.clone())), Some)
+                .force_increase_error_level(5)
+                .run(&rest)?,
+        };
+
+        let (rest, statement) = skip_whitespaces(parse_statement(context.clone()))
+            .force_increase_error_level(5)
+            .run(&rest)?;
+
+        Ok((
+            rest,
+            Declaration::Function(fn_name, args, rtype, Some(Box::from(statement))),
+        ))
+    }
+}
+
+pub fn parse_namespace_declaration(
+    context: Rc<ASTParserContext>,
+) -> impl Fn(&ParserInput) -> Result<(ParserInput, Declaration), ParserErrorInfo> {
+    move |input| {
+        expect_input(input)?;
+        run_parser(
+            map_parser_error(
+                any_of_boxes(vec![Box::from(parse_function_declaration(context.clone()))]),
+                elevate_highest_error(2),
+            ),
+            input,
+        )
+    }
+}
+
+pub fn parse_statement_declaration(
+    context: Rc<ASTParserContext>,
+) -> impl Fn(&ParserInput) -> Result<(ParserInput, Declaration), ParserErrorInfo> {
+    move |input| {
+        expect_input(input)?;
+        run_parser(
+            map_parser_error(
+                any_of_boxes(vec![Box::from(expect_semicolon(
+                    parse_variable_declaration(context.clone()),
+                ))]),
+                elevate_highest_error(2),
+            ),
+            input,
+        )
+    }
+}
+
 pub fn parse_statement(
     context: Rc<ASTParserContext>,
 ) -> impl Fn(&ParserInput) -> Result<(ParserInput, Statement), ParserErrorInfo> {
@@ -642,9 +791,10 @@ pub fn parse_statement(
             map_parser_error(
                 any_of_boxes(vec![
                     Box::from(parse_block(context.clone())),
-                    Box::from(expect_semicolon(parse_statement_variable_declaration(
-                        context.clone(),
-                    ))),
+                    Box::from(map_parser_output(
+                        parse_statement_declaration(context.clone()),
+                        Statement::Declaration,
+                    )),
                     Box::from(map_parser_output(
                         expect_semicolon(parse_expression(context.clone())),
                         Statement::Expression,
@@ -663,14 +813,14 @@ pub fn parse_block(
     move |input| {
         run_parser(
             and_then2(
-                parser_character('{'),
+                skip_whitespaces(parser_character('{')),
                 and_then1(
                     map_parser(
-                        repeat_at_least_0(parse_statement(context.clone())),
+                        repeat_at_least_0(skip_whitespaces(parse_statement(context.clone()))),
                         |statements| Statement::Expression(Expression::Block(statements)),
                         |_| ParserErrorInfo::create(ParserErrorKind::Unknown),
                     ),
-                    parser_character('}'),
+                    skip_whitespaces(parser_character('}')),
                 ),
             ),
             input,
@@ -909,13 +1059,19 @@ mod tests {
                 _ => panic!("Invalid parsed statement: {:?}", parsed),
             }
         }
+    }
+
+    #[test]
+    pub fn test_statement_declaration() {
+        let context = default_context!();
         {
             let input = ParserInput::create("let x = 0x15;");
-            let (rest, parsed) = run_parser(parse_statement(context.clone()), &input).unwrap();
+            let (rest, parsed) =
+                run_parser(parse_statement_declaration(context.clone()), &input).unwrap();
             assert!(rest.is_empty());
             assert_eq!(
                 parsed,
-                Statement::VarDeclaration(
+                Declaration::Variable(
                     Identifier::new("x"),
                     None,
                     Some(Box::from(Expression::LiteralInt("15".to_string(), 16)))
@@ -924,11 +1080,12 @@ mod tests {
         }
         {
             let input = ParserInput::create("let yy: u64 = -0b110;");
-            let (rest, parsed) = run_parser(parse_statement(context.clone()), &input).unwrap();
+            let (rest, parsed) =
+                run_parser(parse_statement_declaration(context.clone()), &input).unwrap();
             assert!(rest.is_empty());
             assert_eq!(
                 parsed,
-                Statement::VarDeclaration(
+                Declaration::Variable(
                     Identifier::new("yy"),
                     Some(Type::Object {
                         base: ObjectTypeBase::UInt64,

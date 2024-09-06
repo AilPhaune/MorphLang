@@ -1,14 +1,16 @@
 use std::{env, fs, io::Result, rc::Rc};
 
 use morphlang::{
+    analysis::symbols::SymbolTable,
     default_context,
     parsing::{
         ast::{BinaryOperatorPrecedence, UnaryOperatorPrecedence},
-        astparser::{parse_expression, ASTParserContext},
-        combinators::{expect_consumed_all, map_parser_error, ParserInput},
+        astparser::{parse_program, ASTParserContext},
+        combinators::{expect_consumed_all, map_parser_error, Either3, ParserInput},
         error::{ParserErrorInfo, ParserErrorKind},
         parser::run_parser,
     },
+    type_checker::tree_descent::TreeDescent,
 };
 
 pub fn main() -> Result<()> {
@@ -18,7 +20,7 @@ pub fn main() -> Result<()> {
     let input = ParserInput::create_from_string(input_data);
 
     let context: Rc<ASTParserContext> = default_context!();
-    let parser = map_parser_error(expect_consumed_all(parse_expression(context)), |e| {
+    let parser = map_parser_error(expect_consumed_all(parse_program(context)), |e| {
         e.unwrap_or(ParserErrorInfo::create(ParserErrorKind::UnexpectedInput))
     });
 
@@ -29,7 +31,12 @@ pub fn main() -> Result<()> {
         Ok((_, ast)) => ast,
     };
 
-    println!("{:?}", result);
+    println!("Parsed: {:?}", result);
+
+    let mut symbol_table = SymbolTable::new().unwrap();
+    TreeDescent::declarations_pass1(&mut symbol_table, Either3::Third(&result), "").unwrap();
+
+    println!("Symbol table: {:?}", symbol_table);
 
     Ok(())
 }

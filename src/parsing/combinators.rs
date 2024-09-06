@@ -50,6 +50,13 @@ pub enum Either<A, B> {
 }
 
 #[derive(Debug, Clone)]
+pub enum Either3<A, B, C> {
+    First(A),
+    Second(B),
+    Third(C),
+}
+
+#[derive(Debug, Clone)]
 pub struct ParserInput {
     pub code: Rc<String>,
     pub current_index: usize,
@@ -884,6 +891,7 @@ where
 pub fn delimited<InputType: Clone, ErrorType1, ErrorType2, OutputType1, OutputType2, P1, P2>(
     delimiter: P1,
     element: P2,
+    at_least_one: bool,
 ) -> impl Fn(&InputType) -> Result<(InputType, Vec<OutputType2>), ErrorType2>
 where
     P1: Parser<InputType, ErrorType1, OutputType1>,
@@ -891,7 +899,16 @@ where
 {
     move |input| {
         let mut values = Vec::new();
-        let (mut input, value) = element.run(input)?;
+        let (mut input, value) = match element.run(input) {
+            Ok(v) => v,
+            Err(e) => {
+                if at_least_one {
+                    Err(e)?
+                } else {
+                    return Ok((input.clone(), values));
+                }
+            }
+        };
         values.push(value);
 
         loop {

@@ -44,8 +44,20 @@ pub enum Expression {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Statement {
-    VarDeclaration(Identifier, Option<Type>, Option<Box<Expression>>),
     Expression(Expression),
+    Declaration(Declaration),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Declaration {
+    Variable(Identifier, Option<Type>, Option<Box<Expression>>),
+    Function(
+        Identifier,
+        Vec<(Identifier, Type)>,
+        Option<Type>,
+        Option<Box<Statement>>,
+    ),
+    Namespace(Identifier, Vec<Declaration>),
 }
 
 #[derive(Debug, Clone, Copy)]
