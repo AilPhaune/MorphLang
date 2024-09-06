@@ -21,7 +21,7 @@ impl UnaryOperatorPrecedence {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Identifier(pub String);
 impl Identifier {
     pub fn new(s: &str) -> Self {
@@ -33,14 +33,16 @@ impl Identifier {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Expression {
+    Builtin,
     LiteralInt(String, i32),
     BinaryOperation(Box<Expression>, Box<Expression>, String),
     UnaryOperation(Box<Expression>, String),
+    Block(Vec<Statement>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Statement {
     VarDeclaration(Identifier, Option<Type>, Option<Box<Expression>>),
     Expression(Expression),

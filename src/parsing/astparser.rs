@@ -9,9 +9,9 @@ use super::{
     },
     combinators::{
         and, and_then1, and_then2, any_of, any_of_boxes, delimited, expect_input, map_parser,
-        map_parser_error, map_parser_output, not, parse_then_restart, parser_character,
-        parser_character_predicate, parser_nothing, parser_token, repeat_at_least_1,
-        skip_whitespaces, ParserInput, PositionInfo,
+        map_parser_error, map_parser_output, not, optional, parse_then_restart, parser_character,
+        parser_character_predicate, parser_nothing, parser_token, repeat_at_least_0,
+        repeat_at_least_1, skip_whitespaces, ParserInput, PositionInfo,
     },
     error::{elevate_highest_error, ParserErrorInfo, ParserErrorKind},
     parser::{run_parser, Parser},
@@ -220,18 +220,29 @@ pub fn parse_bin_literal_int(
 pub fn parse_literal_int(
     input: &ParserInput,
 ) -> Result<(ParserInput, Expression), ParserErrorInfo> {
-    run_parser(
-        map_parser_error(
-            any_of(vec![
-                parse_hex_literal_int,
-                parse_oct_literal_int,
-                parse_bin_literal_int,
-                parse_decimal_literal_int,
-            ]),
-            elevate_highest_error(2),
-        ),
-        input,
+    let (rest, parsed) = optional(parser_character('-'))
+        .run(input)
+        .map_err(|()| ParserErrorInfo::create(ParserErrorKind::Unknown))?;
+    let (rest, int) = map_parser_error(
+        any_of(vec![
+            parse_hex_literal_int,
+            parse_oct_literal_int,
+            parse_bin_literal_int,
+            parse_decimal_literal_int,
+        ]),
+        elevate_highest_error(2),
     )
+    .run(&rest)?;
+    match parsed {
+        None => Ok((rest, int)),
+        Some(c) => match int {
+            Expression::LiteralInt(mut value, radix) => {
+                value.insert(0, c);
+                Ok((rest, Expression::LiteralInt(value, radix)))
+            }
+            _ => Err(ParserErrorInfo::create(ParserErrorKind::Unknown)),
+        },
+    }
 }
 
 pub fn parse_parenthesis_expression(
@@ -290,9 +301,13 @@ pub fn parse_primary(
         run_parser(
             map_parser_error(
                 any_of_boxes(vec![
+                    Box::from(map_parser_output(
+                        parse_keyword("builtin".to_string()),
+                        |_| Expression::Builtin,
+                    )),
+                    Box::from(parse_literal_int),
                     Box::from(parse_unary_operator(context.clone())),
                     Box::from(parse_parenthesis_expression(context.clone())),
-                    Box::from(parse_literal_int),
                 ]),
                 elevate_highest_error(2),
             ),
@@ -424,7 +439,7 @@ pub fn parse_type_base(
 pub fn parse_generics(
     context: &Rc<ASTParserContext>,
     input: &ParserInput,
-) -> Result<(ParserInput, Vec<Type>), ParserErrorInfo> {
+) -> Result<(ParserInput, Option<Vec<Type>>), ParserErrorInfo> {
     match run_parser(parser_character('<'), input) {
         Ok((input, _)) => run_parser(
             and_then1(
@@ -435,8 +450,9 @@ pub fn parse_generics(
                 skip_whitespaces(parser_character('>')),
             ),
             &input,
-        ),
-        Err(_) => Ok((input.clone(), Vec::new())),
+        )
+        .map(|(rest, generics)| (rest, Some(generics))),
+        Err(_) => Ok((input.clone(), None)),
     }
 }
 
@@ -594,19 +610,27 @@ pub fn parse_statement_variable_declaration(
                     ParserErrorInfo::create(ParserErrorKind::Expected("expression".to_string()))
                         .with_level(e.get_level())
                 })?;
-        let (input, _) = skip_whitespaces(parser_character(';'))
-            .force_increase_error_level(2)
-            .run(&input)
-            .map_err(|e| {
-                ParserErrorInfo::create(ParserErrorKind::Expected("';'".to_string()))
-                    .with_level(e.get_level())
-            })?;
 
         Ok((
             input,
             Statement::VarDeclaration(name_ident, var_type, Some(Box::new(expr))),
         ))
     }
+}
+
+pub fn expect_semicolon<OutputType, P>(
+    parser: P,
+) -> impl Fn(&ParserInput) -> Result<(ParserInput, OutputType), ParserErrorInfo>
+where
+    P: Parser<ParserInput, ParserErrorInfo, OutputType>,
+{
+    and_then1(
+        parser,
+        map_parser_error(parser_character(';'), |e| {
+            ParserErrorInfo::create(ParserErrorKind::Expected("';'".to_string()))
+                .with_level(e.get_level() + 3)
+        }),
+    )
 }
 
 pub fn parse_statement(
@@ -617,12 +641,37 @@ pub fn parse_statement(
         run_parser(
             map_parser_error(
                 any_of_boxes(vec![
-                    Box::from(parse_statement_variable_declaration(context.clone())),
-                    Box::from(map_parser_output(parse_expression(context.clone()), |v| {
-                        Statement::Expression(v)
-                    })),
+                    Box::from(parse_block(context.clone())),
+                    Box::from(expect_semicolon(parse_statement_variable_declaration(
+                        context.clone(),
+                    ))),
+                    Box::from(map_parser_output(
+                        expect_semicolon(parse_expression(context.clone())),
+                        Statement::Expression,
+                    )),
                 ]),
                 elevate_highest_error(2),
+            ),
+            input,
+        )
+    }
+}
+
+pub fn parse_block(
+    context: Rc<ASTParserContext>,
+) -> impl Fn(&ParserInput) -> Result<(ParserInput, Statement), ParserErrorInfo> {
+    move |input| {
+        run_parser(
+            and_then2(
+                parser_character('{'),
+                and_then1(
+                    map_parser(
+                        repeat_at_least_0(parse_statement(context.clone())),
+                        |statements| Statement::Expression(Expression::Block(statements)),
+                        |_| ParserErrorInfo::create(ParserErrorKind::Unknown),
+                    ),
+                    parser_character('}'),
+                ),
             ),
             input,
         )
@@ -803,12 +852,7 @@ mod tests {
             let input = ParserInput::create("-71");
             let (rest, parsed) = run_parser(parse_expression(context.clone()), &input).unwrap();
             assert!(rest.is_empty());
-            if let Expression::UnaryOperation(expr, op) = parsed {
-                assert_is_expression_literal_int!(*expr, "71", 10);
-                assert_eq!(op, "-");
-            } else {
-                panic!("Invalid parsed expression: {:?}", parsed);
-            }
+            assert_is_expression_literal_int!(parsed, "-71", 10);
         }
         {
             let input = ParserInput::create("--71");
@@ -816,12 +860,7 @@ mod tests {
             assert!(rest.is_empty());
             if let Expression::UnaryOperation(expr, op) = parsed.clone() {
                 assert_eq!(op, "-");
-                if let Expression::UnaryOperation(expr, op) = *expr {
-                    assert_is_expression_literal_int!(*expr, "71", 10);
-                    assert_eq!(op, "-");
-                } else {
-                    panic!("Invalid parsed expression: {:?}", parsed);
-                }
+                assert_is_expression_literal_int!(*expr, "-71", 10);
             } else {
                 panic!("Invalid parsed expression: {:?}", parsed);
             }
@@ -836,12 +875,7 @@ mod tests {
                     assert_eq!(op, "~");
                     if let Expression::UnaryOperation(expr, op) = *expr {
                         assert_eq!(op, "+");
-                        if let Expression::UnaryOperation(expr, op) = *expr {
-                            assert_eq!(op, "-");
-                            assert_is_expression_literal_int!(*expr, "11011000", 2);
-                        } else {
-                            panic!("Invalid parsed expression: {:?}", parsed);
-                        }
+                        assert_is_expression_literal_int!(*expr, "-11011000", 2);
                     } else {
                         panic!("Invalid parsed expression: {:?}", parsed);
                     }
@@ -851,6 +885,58 @@ mod tests {
             } else {
                 panic!("Invalid parsed expression: {:?}", parsed);
             }
+        }
+    }
+
+    #[test]
+    pub fn test_statement() {
+        let context = default_context!();
+        {
+            let input = ParserInput::create("15+6;");
+            let (rest, parsed) = run_parser(parse_statement(context.clone()), &input).unwrap();
+            assert!(rest.is_empty());
+            match parsed {
+                Statement::Expression(e) => {
+                    assert_eq!(
+                        e,
+                        Expression::BinaryOperation(
+                            Box::new(Expression::LiteralInt("15".to_string(), 10)),
+                            Box::new(Expression::LiteralInt("6".to_string(), 10)),
+                            "+".to_string()
+                        )
+                    );
+                }
+                _ => panic!("Invalid parsed statement: {:?}", parsed),
+            }
+        }
+        {
+            let input = ParserInput::create("let x = 0x15;");
+            let (rest, parsed) = run_parser(parse_statement(context.clone()), &input).unwrap();
+            assert!(rest.is_empty());
+            assert_eq!(
+                parsed,
+                Statement::VarDeclaration(
+                    Identifier::new("x"),
+                    None,
+                    Some(Box::from(Expression::LiteralInt("15".to_string(), 16)))
+                )
+            )
+        }
+        {
+            let input = ParserInput::create("let yy: u64 = -0b110;");
+            let (rest, parsed) = run_parser(parse_statement(context.clone()), &input).unwrap();
+            assert!(rest.is_empty());
+            assert_eq!(
+                parsed,
+                Statement::VarDeclaration(
+                    Identifier::new("yy"),
+                    Some(Type::Object {
+                        base: ObjectTypeBase::UInt64,
+                        generics: None
+                    }),
+                    Some(Box::from(Expression::LiteralInt("-110".to_string(), 2)))
+                )
+            )
         }
     }
 }
