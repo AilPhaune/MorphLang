@@ -136,16 +136,9 @@ impl TypeEvaluator {
                     .filter_map(|op| match op {
                         Symbol::FunctionDeclaration {
                             resolved_signature, ..
-                        } => match resolved_signature {
-                            Some(signature) => {
-                                if Type::is_callable(signature, &[expr_type.clone()]) {
-                                    Some(signature)
-                                } else {
-                                    None
-                                }
-                            }
-                            None => None,
-                        },
+                        } => resolved_signature
+                            .as_ref()
+                            .filter(|signature| Type::is_callable(signature, &[expr_type.clone()])),
                         _ => None,
                     })
                     .collect();
@@ -181,16 +174,9 @@ impl TypeEvaluator {
                     .filter_map(|op| match op {
                         Symbol::FunctionDeclaration {
                             resolved_signature, ..
-                        } => match resolved_signature {
-                            Some(signature) => {
-                                if Type::is_callable(signature, &[lhs.clone(), rhs.clone()]) {
-                                    Some(signature)
-                                } else {
-                                    None
-                                }
-                            }
-                            None => None,
-                        },
+                        } => resolved_signature.as_ref().filter(|signature| {
+                            Type::is_callable(signature, &[lhs.clone(), rhs.clone()])
+                        }),
                         _ => None,
                     })
                     .collect();
