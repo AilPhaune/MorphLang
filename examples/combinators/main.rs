@@ -302,7 +302,11 @@ fn update_display(
     write_combinator_output(parse_literal_int, input, "int lit: ", len_counter)?;
     write_combinator_output(parse_identifier, input, "identifier: ", len_counter)?;
     write_combinator_output(
-        delimited(parser_character(','), parse_expression(context.clone())),
+        delimited(
+            parser_character(','),
+            parse_expression(context.clone()),
+            true,
+        ),
         input,
         "',' delimited expr: ",
         len_counter,
