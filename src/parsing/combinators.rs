@@ -583,6 +583,7 @@ where
 /// use crate::morphlang::parsing::combinators::{and_then2, parser_token, skip_whitespaces, ParserInput};
 /// use crate::morphlang::parsing::parser::Parser;
 /// use crate::morphlang::assert_eq_position_info;
+/// use crate::morphlang::traits::has_len::HasLen;
 ///
 /// let input = ParserInput::create("your input");
 /// let parser = and_then2(
@@ -640,6 +641,7 @@ where
 /// use crate::morphlang::parsing::combinators::{and_then1, parser_token, skip_whitespaces, ParserInput};
 /// use crate::morphlang::parsing::parser::Parser;
 /// use crate::morphlang::assert_eq_position_info;
+/// use crate::morphlang::traits::has_len::HasLen;
 ///
 /// let input = ParserInput::create("your input");
 /// let parser = and_then1(
