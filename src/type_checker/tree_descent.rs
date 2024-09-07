@@ -36,7 +36,7 @@ impl TreeDescent {
                 }
                 Expression::Block(pos, statements) => {
                     let block = symbol_table.get_anonymous_block_name(parent)?;
-                    symbol_table.add_symbol(&block, Symbol::Block(pos.clone()))?;
+                    symbol_table.add_symbol(&block, Symbol::Block(*pos))?;
                     for statement in statements.iter() {
                         Self::declarations_pass1(symbol_table, Either3::First(statement), &block)?;
                     }
@@ -46,7 +46,7 @@ impl TreeDescent {
             Either3::Third(declaration) => match declaration {
                 Declaration::Namespace(pos, namespace, declarations) => {
                     let child = symbol_table.get_child_name(parent, &namespace.name)?;
-                    symbol_table.add_symbol(&child, Symbol::Namespace(pos.clone()))?;
+                    symbol_table.add_symbol(&child, Symbol::Namespace(*pos))?;
                     for decl in declarations.iter() {
                         Self::declarations_pass1(symbol_table, Either3::Third(decl), &child)?;
                     }
@@ -54,12 +54,7 @@ impl TreeDescent {
                 }
                 Declaration::Function(pos, name, args, rtype, body) => {
                     let function = symbol_table.get_child_name(parent, &name.name)?;
-                    symbol_table.add_function(
-                        &function,
-                        args.clone(),
-                        rtype.clone(),
-                        pos.clone(),
-                    )?;
+                    symbol_table.add_function(&function, args.clone(), rtype.clone(), *pos)?;
                     for (argi, argt) in args.iter() {
                         let argname = symbol_table.get_child_name(&function, &argi.name)?;
                         symbol_table.add_variable(
@@ -75,7 +70,7 @@ impl TreeDescent {
                 }
                 Declaration::Variable(pos, name, vtype, ..) => {
                     let variable = symbol_table.get_child_name(parent, &name.name)?;
-                    symbol_table.add_variable(&variable, vtype.clone(), pos.clone())?;
+                    symbol_table.add_variable(&variable, vtype.clone(), *pos)?;
                     Ok(())
                 }
             },

@@ -1123,14 +1123,17 @@ mod tests {
                     assert_eq!(
                         e,
                         Expression::BinaryOperation(
-                            PositionInfo::create(0, 0, 0).until(&PositionInfo::create(4, 0, 4)),
+                            PositionInfo::create(0, 0, 0, 0)
+                                .until(&PositionInfo::create(4, 0, 4, 0)),
                             Box::new(Expression::LiteralInt(
-                                PositionInfo::create(0, 0, 0).until(&PositionInfo::create(2, 0, 2)),
+                                PositionInfo::create(0, 0, 0, 0)
+                                    .until(&PositionInfo::create(2, 0, 2, 0)),
                                 "15".to_string(),
                                 10
                             )),
                             Box::new(Expression::LiteralInt(
-                                PositionInfo::create(3, 0, 3).until(&PositionInfo::create(4, 0, 4)),
+                                PositionInfo::create(3, 0, 3, 0)
+                                    .until(&PositionInfo::create(4, 0, 4, 0)),
                                 "6".to_string(),
                                 10
                             )),
@@ -1154,14 +1157,14 @@ mod tests {
             assert_eq!(
                 parsed,
                 Declaration::Variable(
-                    PositionInfo::create(0, 0, 0).until(&PositionInfo::create(12, 0, 12)),
+                    PositionInfo::create(0, 0, 0, 0).until(&PositionInfo::create(12, 0, 12, 0)),
                     Identifier::new(
-                        PositionInfo::create(4, 0, 4).until(&PositionInfo::create(5, 0, 5)),
+                        PositionInfo::create(4, 0, 4, 0).until(&PositionInfo::create(5, 0, 5, 0)),
                         "x"
                     ),
                     None,
                     Some(Box::from(Expression::LiteralInt(
-                        PositionInfo::create(8, 0, 8).until(&PositionInfo::create(12, 0, 12)),
+                        PositionInfo::create(8, 0, 8, 0).until(&PositionInfo::create(12, 0, 12, 0)),
                         "15".to_string(),
                         16
                     )))
@@ -1176,19 +1179,20 @@ mod tests {
             assert_eq!(
                 parsed,
                 Declaration::Variable(
-                    PositionInfo::create(0, 0, 0).until(&PositionInfo::create(20, 0, 20)),
+                    PositionInfo::create(0, 0, 0, 0).until(&PositionInfo::create(20, 0, 20, 0)),
                     Identifier::new(
-                        PositionInfo::create(4, 0, 4).until(&PositionInfo::create(6, 0, 6)),
+                        PositionInfo::create(4, 0, 4, 0).until(&PositionInfo::create(6, 0, 6, 0)),
                         "yy"
                     ),
                     Some(Type::Object {
-                        position: PositionInfo::create(8, 0, 8)
-                            .until(&PositionInfo::create(11, 0, 11)),
+                        position: PositionInfo::create(8, 0, 8, 0)
+                            .until(&PositionInfo::create(11, 0, 11, 0)),
                         base: ObjectTypeBase::UInt64,
                         generics: None
                     }),
                     Some(Box::from(Expression::LiteralInt(
-                        PositionInfo::create(14, 0, 14).until(&PositionInfo::create(20, 0, 20)),
+                        PositionInfo::create(14, 0, 14, 0)
+                            .until(&PositionInfo::create(20, 0, 20, 0)),
                         "-110".to_string(),
                         2
                     )))

@@ -59,6 +59,7 @@ pub enum Either3<A, B, C> {
 #[derive(Debug, Clone)]
 pub struct ParserInput {
     pub code: Rc<String>,
+    pub source_code_file_index: usize,
     pub current_index: usize,
     pub current_line: usize,
     pub current_line_index: usize,
@@ -67,6 +68,7 @@ pub struct ParserInput {
 impl ParserInput {
     pub fn create(code: &str) -> Self {
         Self {
+            source_code_file_index: 0,
             code: Rc::new(code.to_string()),
             current_index: 0,
             current_line: 0,
@@ -76,6 +78,7 @@ impl ParserInput {
 
     pub fn create_from_string(code: String) -> Self {
         Self {
+            source_code_file_index: 1,
             code: Rc::new(code),
             current_index: 0,
             current_line: 0,
@@ -97,6 +100,7 @@ impl ParserInput {
                 c,
                 if c == '\n' {
                     Self {
+                        source_code_file_index: self.source_code_file_index,
                         code: self.code.to_owned(),
                         current_index: self.current_index + 1,
                         current_line: self.current_line + 1,
@@ -104,6 +108,7 @@ impl ParserInput {
                     }
                 } else {
                     Self {
+                        source_code_file_index: self.source_code_file_index,
                         code: self.code.to_owned(),
                         current_index: self.current_index + 1,
                         current_line: self.current_line,
@@ -136,7 +141,8 @@ impl ParserInput {
     }
 
     pub fn get_before(&self) -> PositionInfo {
-        PositionInfo::create(0, 0, 0).until(&PositionInfo::from_parser_input_position(self))
+        PositionInfo::create(0, 0, 0, self.source_code_file_index)
+            .until(&PositionInfo::from_parser_input_position(self))
     }
 }
 
@@ -157,6 +163,7 @@ impl HasLen for ParserInput {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PositionInfo {
+    pub source_code_file_index: usize,
     pub start_index: usize,
     pub start_line: usize,
     pub start_line_index: usize,
@@ -166,8 +173,14 @@ pub struct PositionInfo {
 }
 
 impl PositionInfo {
-    pub fn create(start_index: usize, start_line: usize, start_line_index: usize) -> Self {
+    pub fn create(
+        start_index: usize,
+        start_line: usize,
+        start_line_index: usize,
+        source_code_file_index: usize,
+    ) -> Self {
         Self {
+            source_code_file_index,
             start_index,
             start_line,
             start_line_index,
@@ -183,6 +196,7 @@ impl PositionInfo {
 
     pub fn from_parser_input_position(p: &ParserInput) -> Self {
         Self {
+            source_code_file_index: p.source_code_file_index,
             start_index: p.current_index,
             start_line: p.current_line,
             start_line_index: p.current_line_index,
@@ -194,6 +208,7 @@ impl PositionInfo {
 
     pub fn until(&self, end: &Self) -> Self {
         Self {
+            source_code_file_index: self.source_code_file_index,
             start_index: self.start_index,
             start_line: self.start_line,
             start_line_index: self.start_line_index,

@@ -93,7 +93,7 @@ impl TypeEvaluator {
     ) -> Result<Type, TypeError> {
         match statement {
             Statement::Expression(expr) => Self::evaluate_expression_type(symbol_table, expr),
-            Statement::Declaration(decl) => Ok(Type::void(decl.position().clone())),
+            Statement::Declaration(decl) => Ok(Type::void(*decl.position())),
         }
     }
 
@@ -105,7 +105,7 @@ impl TypeEvaluator {
             Expression::LiteralInt(pos, value, radix) => {
                 let ival = parse_signed_int(value, *radix)?;
                 Ok(Type::Object {
-                    position: pos.clone(),
+                    position: *pos,
                     base: match ival {
                         Either::Second(_) => ObjectTypeBase::UInt128,
                         Either::First(value) => {
@@ -155,10 +155,9 @@ impl TypeEvaluator {
                         vec![expr_type.clone()],
                     ))?
                 } else if ops.len() == 1 {
-                    Self::get_fn_call_return_type(ops[0], &[expr_type.clone()], pos.clone())
-                        .ok_or_else(|| {
-                            TypeError::OperatorNotDefined(operator.clone(), vec![expr_type.clone()])
-                        })
+                    Self::get_fn_call_return_type(ops[0], &[expr_type.clone()], *pos).ok_or_else(
+                        || TypeError::OperatorNotDefined(operator.clone(), vec![expr_type.clone()]),
+                    )
                 } else {
                     Err(TypeError::OperatorAmbiguous(
                         operator.clone(),
@@ -194,7 +193,7 @@ impl TypeEvaluator {
                         vec![lhs.clone(), rhs.clone()],
                     ))?
                 } else if ops.len() == 1 {
-                    Self::get_fn_call_return_type(ops[0], &[lhs.clone(), rhs.clone()], pos.clone())
+                    Self::get_fn_call_return_type(ops[0], &[lhs.clone(), rhs.clone()], *pos)
                         .ok_or_else(|| {
                             TypeError::OperatorNotDefined(
                                 operator.clone(),
@@ -208,10 +207,10 @@ impl TypeEvaluator {
                     ))?
                 }
             }
-            Expression::Builtin(pos) => Ok(Type::Never(pos.clone())),
+            Expression::Builtin(pos) => Ok(Type::Never(*pos)),
             Expression::Block(pos, statements) => {
                 if statements.is_empty() {
-                    Ok(Type::void(pos.clone()))
+                    Ok(Type::void(*pos))
                 } else {
                     Self::evaluate_statement_type(
                         symbol_table,

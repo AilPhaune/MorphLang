@@ -31,12 +31,12 @@ pub fn main() -> Result<()> {
         Ok((_, ast)) => ast,
     };
 
-    println!("Parsed: {:?}", result);
+    println!("Parsed: {:#?}", result);
 
     let mut symbol_table = SymbolTable::new().unwrap();
     TreeDescent::declarations_pass1(&mut symbol_table, Either3::Third(&result), "").unwrap();
 
-    println!("Symbol table: {:?}", symbol_table);
+    println!("Symbol table: {:#?}", symbol_table);
 
     Ok(())
 }

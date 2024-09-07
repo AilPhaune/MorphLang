@@ -81,9 +81,15 @@ pub struct SymbolTable {
 impl SymbolTable {
     pub fn new() -> Result<Self, SymbolError> {
         let mut def = Self::default();
-        def.add_symbol("", Symbol::Namespace(PositionInfo::create(0, 0, 0)))?;
-        def.add_symbol("@binops", Symbol::Namespace(PositionInfo::create(0, 0, 0)))?;
-        def.add_symbol("@unops", Symbol::Namespace(PositionInfo::create(0, 0, 0)))?;
+        def.add_symbol("", Symbol::Namespace(PositionInfo::create(0, 0, 0, 0)))?;
+        def.add_symbol(
+            "@binops",
+            Symbol::Namespace(PositionInfo::create(0, 0, 0, 0)),
+        )?;
+        def.add_symbol(
+            "@unops",
+            Symbol::Namespace(PositionInfo::create(0, 0, 0, 0)),
+        )?;
         Ok(def)
     }
 
@@ -137,7 +143,7 @@ impl SymbolTable {
         let mut declared_signature: Vec<Option<Type>> =
             args.iter().map(|(_, t)| Some(t).cloned()).collect();
         if declared_signature.is_empty() {
-            declared_signature.push(Some(Type::void(position.clone())));
+            declared_signature.push(Some(Type::void(position)));
         }
         declared_signature.push(rtype);
         self.add_symbol(
