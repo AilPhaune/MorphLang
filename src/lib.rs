@@ -1,5 +1,6 @@
 pub mod analysis;
 pub mod parsing;
+pub mod preprocessor;
 pub mod traits;
 pub mod type_checker;
 

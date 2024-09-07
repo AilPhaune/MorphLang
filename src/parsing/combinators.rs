@@ -49,6 +49,18 @@ pub enum Either<A, B> {
     Second(B),
 }
 
+impl<A, B> Either<A, B> {
+    pub fn get<R>(self) -> R
+    where
+        R: From<A> + From<B>,
+    {
+        match self {
+            Either::First(a) => R::from(a),
+            Either::Second(b) => R::from(b),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Either3<A, B, C> {
     First(A),
@@ -662,6 +674,66 @@ where
     }
 }
 
+/// Matches parser1 then parser2, and returns only the result of parser 2
+///
+/// # Examples
+///
+/// Example 1: Success case
+/// ```
+/// use crate::morphlang::parsing::combinators::{and_then_both, parser_token, skip_whitespaces, ParserInput};
+/// use crate::morphlang::parsing::parser::Parser;
+/// use crate::morphlang::assert_eq_position_info;
+/// use crate::morphlang::traits::has_len::HasLen;
+///
+/// let input = ParserInput::create("your input");
+/// let parser = and_then_both(
+///     parser_token("your".to_string()),
+///     skip_whitespaces(parser_token("input".to_string()))
+/// );
+///
+/// match parser.run(&input) {
+///     Err(e) => panic!("Parser wasn't supposed to fail !"),
+///     Ok((remaining_input, (parsed1, parsed2))) => {
+///         assert_eq_position_info!(parsed1, 0, 0, 0, 4, 0, 4);
+///         assert_eq_position_info!(parsed2, 5, 0, 5, 10, 0, 10);
+///         assert!(remaining_input.is_empty());
+///     },
+/// }
+/// ```
+///
+/// Example 2: Fail case
+/// ```
+/// use crate::morphlang::parsing::combinators::{and_then_both, parser_token, skip_whitespaces, ParserInput};
+/// use crate::morphlang::parsing::parser::Parser;
+///
+/// let input = ParserInput::create("your different input");
+/// let parser = and_then_both(
+///     parser_token("your".to_string()),
+///     skip_whitespaces(parser_token("input".to_string()))
+/// );
+///
+/// match parser.run(&input) {
+///     Err(e) => {
+///         println!("Parser failed with error {:?}, which was intended !", e)    
+///     },
+///     Ok(v) => panic!("Parser was supposed to fail, got Ok({:?})", v),
+/// }
+/// ```
+pub fn and_then_both<InputType: Clone, ErrorType1, ErrorType2, OutputType1, OutputType2, P1, P2>(
+    parser1: P1,
+    parser2: P2,
+) -> impl Fn(&InputType) -> Result<(InputType, (OutputType1, OutputType2)), Either<ErrorType1, ErrorType2>>
+where
+    P1: Parser<InputType, ErrorType1, OutputType1>,
+    P2: Parser<InputType, ErrorType2, OutputType2>,
+{
+    move |input| {
+        let (input, res1) = parser1.run(input).map_err(Either::First)?;
+        let (input, res2) = parser2.run(&input).map_err(Either::Second)?;
+        Ok((input, (res1, res2)))
+    }
+}
+
 /// Matches parser1 then parser2, and returns only the result of parser 1
 ///
 /// # Examples
@@ -780,20 +852,20 @@ where
 }
 
 /// Matches parser1 OR parser2, and returns the result of the first one that succeeds, or both errors if both fail
-pub fn or<InputType: Clone, ErrorType1, ErrorType2, OutputType, P1, P2>(
+pub fn or<InputType: Clone, ErrorType1, ErrorType2, OutputType1, OutputType2, P1, P2>(
     parser1: P1,
     parser2: P2,
-) -> impl Fn(&InputType) -> Result<(InputType, OutputType), (ErrorType1, ErrorType2)>
+) -> impl Fn(&InputType) -> Result<(InputType, Either<OutputType1, OutputType2>), (ErrorType1, ErrorType2)>
 where
-    P1: Parser<InputType, ErrorType1, OutputType>,
-    P2: Parser<InputType, ErrorType2, OutputType>,
+    P1: Parser<InputType, ErrorType1, OutputType1>,
+    P2: Parser<InputType, ErrorType2, OutputType2>,
 {
     move |input| match parser1.run(input) {
         Err(err1) => match parser2.run(input) {
             Err(err2) => Err((err1, err2)),
-            Ok(v) => Ok(v),
+            Ok((rest, parsed)) => Ok((rest, Either::Second(parsed))),
         },
-        Ok(v) => Ok(v),
+        Ok((rest, parsed)) => Ok((rest, Either::First(parsed))),
     }
 }
 
@@ -1246,15 +1318,18 @@ mod tests {
 
     #[test]
     fn test_or() -> Result<(), ParserErrorInfo> {
-        let parser = or(
+        let parser = map_parser_output(
             or(
-                parser_token("int".to_string()),
-                parser_token("float".to_string()),
+                or(
+                    parser_token("int".to_string()),
+                    parser_token("float".to_string()),
+                ),
+                or(
+                    parser_token("void".to_string()),
+                    parser_token("double".to_string()),
+                ),
             ),
-            or(
-                parser_token("void".to_string()),
-                parser_token("double".to_string()),
-            ),
+            |o, _, _| o.get::<Either<PositionInfo, PositionInfo>>().get(),
         );
         test_template_or0(parser).map_err(|_| ParserErrorInfo::create(ParserErrorKind::Unknown))?;
         Ok(())

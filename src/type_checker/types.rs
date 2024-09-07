@@ -15,6 +15,7 @@ pub enum ObjectTypeBase {
     UInt64,
     UInt128,
     Bool,
+    String,
     Void,
     Function(Box<Vec<Type>>),
     UserDefined(Identifier),

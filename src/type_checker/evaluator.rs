@@ -102,6 +102,11 @@ impl TypeEvaluator {
         expression: &Expression,
     ) -> Result<Type, TypeError> {
         match expression {
+            Expression::LiteralString(pos, _) => Ok(Type::Object {
+                position: *pos,
+                base: ObjectTypeBase::String,
+                generics: None,
+            }),
             Expression::LiteralInt(pos, value, radix) => {
                 let ival = parse_signed_int(value, *radix)?;
                 Ok(Type::Object {

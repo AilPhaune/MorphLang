@@ -1,7 +1,8 @@
+#operator unary "~" 50
+#operator binary "+" assoc_left 100
+
 namespace a {
-    namespace b {
-        namespace c {
-            
-        }
+    fn main() {
+        let x = 15 + ~5;
     }
 }

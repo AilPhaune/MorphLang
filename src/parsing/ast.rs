@@ -10,6 +10,16 @@ pub enum BinaryOperatorPrecedence {
     RightAssociative(u64, String),
 }
 
+impl BinaryOperatorPrecedence {
+    pub fn is_same_operator(&self, other: &BinaryOperatorPrecedence) -> bool {
+        (match self {
+            Self::LeftAssociative(_, op) | Self::RightAssociative(_, op) => op,
+        }) == (match other {
+            Self::LeftAssociative(_, op) | Self::RightAssociative(_, op) => op,
+        })
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct UnaryOperatorPrecedence(u64, String);
 
@@ -20,6 +30,10 @@ impl UnaryOperatorPrecedence {
 
     pub fn get(&self) -> (&u64, &String) {
         (&self.0, &self.1)
+    }
+
+    pub fn is_same_operator(&self, other: &UnaryOperatorPrecedence) -> bool {
+        self.1 == other.1
     }
 }
 
@@ -47,6 +61,7 @@ impl Identifier {
 pub enum Expression {
     Builtin(PositionInfo),
     LiteralInt(PositionInfo, String, i32),
+    LiteralString(PositionInfo, String),
     BinaryOperation(PositionInfo, Box<Expression>, Box<Expression>, String),
     UnaryOperation(PositionInfo, Box<Expression>, String),
     Block(PositionInfo, Vec<Statement>),
@@ -59,7 +74,8 @@ impl Expression {
             | Self::LiteralInt(pos, ..)
             | Self::BinaryOperation(pos, ..)
             | Self::UnaryOperation(pos, ..)
-            | Self::Block(pos, ..) => pos,
+            | Self::Block(pos, ..)
+            | Self::LiteralString(pos, ..) => pos,
         }
     }
 }

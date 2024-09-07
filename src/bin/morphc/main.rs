@@ -2,14 +2,13 @@ use std::{env, fs, io::Result, rc::Rc};
 
 use morphlang::{
     analysis::symbols::SymbolTable,
-    default_context,
     parsing::{
-        ast::{BinaryOperatorPrecedence, UnaryOperatorPrecedence},
         astparser::{parse_program, ASTParserContext},
         combinators::{expect_consumed_all, map_parser_error, Either3, ParserInput},
         error::{ParserErrorInfo, ParserErrorKind},
         parser::run_parser,
     },
+    preprocessor::Preprocessor,
     type_checker::tree_descent::TreeDescent,
 };
 
@@ -17,9 +16,17 @@ pub fn main() -> Result<()> {
     let arg_data = parse_args();
 
     let input_data = fs::read_to_string(arg_data.input_file)?;
-    let input = ParserInput::create_from_string(input_data);
 
-    let context: Rc<ASTParserContext> = default_context!();
+    let mut preprocessor = Preprocessor::new();
+    let preprocessed_input = preprocessor.preprocess(input_data).unwrap();
+
+    println!("Preprocessed input:\n{}\n", preprocessed_input);
+
+    println!("Preprocessor state:\n{:#?}\n", preprocessor);
+
+    let input = ParserInput::create_from_string(preprocessed_input);
+
+    let context: Rc<ASTParserContext> = Rc::from(preprocessor.context);
     let parser = map_parser_error(expect_consumed_all(parse_program(context)), |e| {
         e.unwrap_or(ParserErrorInfo::create(ParserErrorKind::UnexpectedInput))
     });

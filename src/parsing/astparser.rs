@@ -20,7 +20,7 @@ use super::{
     parser::{run_parser, Parser},
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ASTParserContext {
     pub binary_operators: Vec<BinaryOperatorPrecedence>,
     pub unary_operators: Vec<UnaryOperatorPrecedence>,
@@ -902,6 +902,60 @@ pub fn parse_block(
             input,
         )
     }
+}
+
+pub fn parse_string(input: &ParserInput) -> Result<(ParserInput, Expression), ParserErrorInfo> {
+    let begin = PositionInfo::from_parser_input_position(input);
+    let (mut input, _) = map_parser_error(parser_character('"'), |e| {
+        ParserErrorInfo::create(ParserErrorKind::Expected("string litteral".to_string()))
+            .with_level(e.get_level())
+            .with_cause0(&e)
+    })
+    .run(input)?;
+    let mut result: String = String::new();
+    let mut is_escaping = false;
+    let mut string_terminated = false;
+    while let Ok((rest, c)) = parser_character_predicate(|_| true, "ANY_CHARACTER").run(&input) {
+        input = rest;
+        if c == '\r' {
+            continue;
+        }
+        if is_escaping {
+            result.push(match c {
+                'n' => '\n',
+                'r' => '\r',
+                't' => '\t',
+                '\'' => '\'',
+                '"' => '"',
+                '0' => '\0',
+                _ => c,
+            });
+            is_escaping = false;
+            continue;
+        }
+        if c == '\\' {
+            is_escaping = true;
+            continue;
+        }
+        if c == '\n' {
+            Err(ParserErrorInfo::create(ParserErrorKind::InvalidLiteral).with_level(5))?
+        }
+        if c == '"' {
+            string_terminated = true;
+            break;
+        }
+        result.push(c);
+    }
+    if !string_terminated {
+        Err(ParserErrorInfo::create(ParserErrorKind::InvalidLiteral).with_level(5))?
+    }
+
+    let expr = Expression::LiteralString(
+        begin.until(&PositionInfo::from_parser_input_position(&input)),
+        result,
+    );
+
+    Ok((input, expr))
 }
 
 #[cfg(test)]

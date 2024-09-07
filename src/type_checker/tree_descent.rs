@@ -24,7 +24,9 @@ impl TreeDescent {
                 }
             },
             Either3::Second(expression) => match expression {
-                Expression::Builtin(..) | Expression::LiteralInt(..) => Ok(()),
+                Expression::Builtin(..)
+                | Expression::LiteralInt(..)
+                | Expression::LiteralString(..) => Ok(()),
                 Expression::BinaryOperation(_, lhs, rhs, _) => {
                     Self::declarations_pass1(symbol_table, Either3::Second(lhs), parent)?;
                     Self::declarations_pass1(symbol_table, Either3::Second(rhs), parent)?;
