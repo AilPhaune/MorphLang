@@ -26,7 +26,7 @@ pub fn main() -> Result<()> {
 
     let result = match run_parser(&parser, &input) {
         Err(e) => {
-            panic!("Error: {:?}", e);
+            panic!("Error: {:#?}", e);
         }
         Ok((_, ast)) => ast,
     };

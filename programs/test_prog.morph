@@ -1,6 +1,7 @@
-namespace main {
-    fn main() {
-        let x: u64 = 154;
-        let y: i32 = 17;
+namespace a {
+    namespace b {
+        namespace c {
+            
+        }
     }
 }

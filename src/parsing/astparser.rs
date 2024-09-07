@@ -825,7 +825,10 @@ pub fn parse_namespace_declaration(
         expect_input(input)?;
         run_parser(
             map_parser_error(
-                any_of_boxes(vec![Box::from(parse_function_declaration(context.clone()))]),
+                any_of_boxes(vec![
+                    Box::from(parse_namespace(context.clone())),
+                    Box::from(parse_function_declaration(context.clone())),
+                ]),
                 elevate_highest_error(2),
             ),
             input,
