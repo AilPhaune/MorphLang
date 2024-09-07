@@ -2,7 +2,7 @@ use crate::{
     analysis::symbols::{Symbol, SymbolTable},
     parsing::{
         ast::{Expression, Statement},
-        combinators::Either,
+        combinators::{Either, PositionInfo},
     },
 };
 
@@ -65,9 +65,13 @@ pub fn parse_signed_int(value: &str, radix: i32) -> Result<Either<i128, u128>, T
 pub struct TypeEvaluator;
 
 impl TypeEvaluator {
-    pub fn get_fn_call_return_type(signature: &[Type], args: &[Type]) -> Option<Type> {
-        if args.iter().any(|t| t == &Type::Never) {
-            return Some(Type::Never);
+    pub fn get_fn_call_return_type(
+        signature: &[Type],
+        args: &[Type],
+        position: PositionInfo,
+    ) -> Option<Type> {
+        if args.iter().any(|t| matches!(t, Type::Never(..))) {
+            return Some(Type::Never(position));
         }
         let res: Vec<Type> = signature.iter().skip(args.len()).cloned().collect();
         if res.is_empty() {
@@ -76,6 +80,7 @@ impl TypeEvaluator {
             Some(res[0].clone())
         } else {
             Some(Type::Object {
+                position,
                 base: ObjectTypeBase::Function(Box::new(res)),
                 generics: None,
             })
@@ -88,7 +93,7 @@ impl TypeEvaluator {
     ) -> Result<Type, TypeError> {
         match statement {
             Statement::Expression(expr) => Self::evaluate_expression_type(symbol_table, expr),
-            Statement::Declaration(_) => Ok(Type::void()),
+            Statement::Declaration(decl) => Ok(Type::void(decl.position().clone())),
         }
     }
 
@@ -97,9 +102,10 @@ impl TypeEvaluator {
         expression: &Expression,
     ) -> Result<Type, TypeError> {
         match expression {
-            Expression::LiteralInt(value, radix) => {
+            Expression::LiteralInt(pos, value, radix) => {
                 let ival = parse_signed_int(value, *radix)?;
                 Ok(Type::Object {
+                    position: pos.clone(),
                     base: match ival {
                         Either::Second(_) => ObjectTypeBase::UInt128,
                         Either::First(value) => {
@@ -125,7 +131,7 @@ impl TypeEvaluator {
                     generics: None,
                 })
             }
-            Expression::UnaryOperation(expression, operator) => {
+            Expression::UnaryOperation(pos, expression, operator) => {
                 let expr_type = Self::evaluate_expression_type(symbol_table, expression)?;
                 let ops: Vec<_> = symbol_table
                     .get_unary_operator(operator)?
@@ -149,9 +155,10 @@ impl TypeEvaluator {
                         vec![expr_type.clone()],
                     ))?
                 } else if ops.len() == 1 {
-                    Self::get_fn_call_return_type(ops[0], &[expr_type.clone()]).ok_or_else(|| {
-                        TypeError::OperatorNotDefined(operator.clone(), vec![expr_type.clone()])
-                    })
+                    Self::get_fn_call_return_type(ops[0], &[expr_type.clone()], pos.clone())
+                        .ok_or_else(|| {
+                            TypeError::OperatorNotDefined(operator.clone(), vec![expr_type.clone()])
+                        })
                 } else {
                     Err(TypeError::OperatorAmbiguous(
                         operator.clone(),
@@ -159,7 +166,7 @@ impl TypeEvaluator {
                     ))?
                 }
             }
-            Expression::BinaryOperation(lhs, rhs, operator) => {
+            Expression::BinaryOperation(pos, lhs, rhs, operator) => {
                 let lhs = Self::evaluate_expression_type(symbol_table, lhs)?;
                 let rhs = Self::evaluate_expression_type(symbol_table, rhs)?;
                 let ops: Vec<_> = symbol_table
@@ -187,14 +194,13 @@ impl TypeEvaluator {
                         vec![lhs.clone(), rhs.clone()],
                     ))?
                 } else if ops.len() == 1 {
-                    Self::get_fn_call_return_type(ops[0], &[lhs.clone(), rhs.clone()]).ok_or_else(
-                        || {
+                    Self::get_fn_call_return_type(ops[0], &[lhs.clone(), rhs.clone()], pos.clone())
+                        .ok_or_else(|| {
                             TypeError::OperatorNotDefined(
                                 operator.clone(),
                                 vec![lhs.clone(), rhs.clone()],
                             )
-                        },
-                    )
+                        })
                 } else {
                     Err(TypeError::OperatorAmbiguous(
                         operator.clone(),
@@ -202,10 +208,10 @@ impl TypeEvaluator {
                     ))?
                 }
             }
-            Expression::Builtin => Ok(Type::Never),
-            Expression::Block(statements) => {
+            Expression::Builtin(pos) => Ok(Type::Never(pos.clone())),
+            Expression::Block(pos, statements) => {
                 if statements.is_empty() {
-                    Ok(Type::void())
+                    Ok(Type::void(pos.clone()))
                 } else {
                     Self::evaluate_statement_type(
                         symbol_table,

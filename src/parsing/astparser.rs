@@ -127,8 +127,9 @@ pub fn parse_decimal_literal_int(
                     "ALPHABETIC",
                 )),
             ),
-            |v| {
+            |v, begin, end| {
                 Expression::LiteralInt(
+                    PositionInfo::from_begin_and_end(begin, end),
                     v.iter().filter(|&&c| c != '_').collect::<String>(),
                     if v[0] == '0' { 8 } else { 10 },
                 )
@@ -165,7 +166,13 @@ pub fn parse_hex_literal_int(
                     |_| ParserErrorInfo::create(ParserErrorKind::InvalidLiteral).with_level(5),
                 ),
             ),
-            |v| Expression::LiteralInt(v.iter().filter(|&&c| c != '_').collect::<String>(), 16),
+            |v, begin, end| {
+                Expression::LiteralInt(
+                    PositionInfo::from_begin_and_end(begin, end),
+                    v.iter().filter(|&&c| c != '_').collect::<String>(),
+                    16,
+                )
+            },
             |e| e.with_info("In `parse_hex_literal_int`".to_string()),
         ),
         input,
@@ -193,7 +200,13 @@ pub fn parse_oct_literal_int(
                     |_| ParserErrorInfo::create(ParserErrorKind::InvalidLiteral).with_level(5),
                 ),
             ),
-            |v| Expression::LiteralInt(v.iter().filter(|&&c| c != '_').collect::<String>(), 8),
+            |v, begin, end| {
+                Expression::LiteralInt(
+                    PositionInfo::from_begin_and_end(begin, end),
+                    v.iter().filter(|&&c| c != '_').collect::<String>(),
+                    8,
+                )
+            },
             |e| e.with_info("In `parse_oct_literal_int`".to_string()),
         ),
         input,
@@ -221,7 +234,13 @@ pub fn parse_bin_literal_int(
                     |_| ParserErrorInfo::create(ParserErrorKind::InvalidLiteral).with_level(5),
                 ),
             ),
-            |v| Expression::LiteralInt(v.iter().filter(|&&c| c != '_').collect::<String>(), 2),
+            |v, begin, end| {
+                Expression::LiteralInt(
+                    PositionInfo::from_begin_and_end(begin, end),
+                    v.iter().filter(|&&c| c != '_').collect::<String>(),
+                    2,
+                )
+            },
             |e| e.with_info("In `parse_bin_literal_int`".to_string()),
         ),
         input,
@@ -247,9 +266,11 @@ pub fn parse_literal_int(
     match parsed {
         None => Ok((rest, int)),
         Some(c) => match int {
-            Expression::LiteralInt(mut value, radix) => {
+            Expression::LiteralInt(mut position, mut value, radix) => {
                 value.insert(0, c);
-                Ok((rest, Expression::LiteralInt(value, radix)))
+                position.start_index -= 1;
+                position.start_line_index -= 1;
+                Ok((rest, Expression::LiteralInt(position, value, radix)))
             }
             _ => Err(ParserErrorInfo::create(ParserErrorKind::Unknown)),
         },
@@ -281,12 +302,16 @@ pub fn parse_unary_operator(
     move |input| {
         let mut found_op = None;
         let mut found_prec = 0;
+        let mut found_pos = PositionInfo::from_parser_input_position(input);
 
         for op in context.unary_operators.iter() {
             let (prec, op_str) = op.get();
-            if parser_token(op_str.clone()).run(input).is_ok() && *prec > found_prec {
-                found_op = Some(op_str.clone());
-                found_prec = *prec;
+            if *prec > found_prec {
+                if let Ok((_, pos)) = parser_token(op_str.clone()).run(input) {
+                    found_op = Some(op_str.clone());
+                    found_prec = *prec;
+                    found_pos = pos;
+                }
             }
         }
 
@@ -297,7 +322,7 @@ pub fn parse_unary_operator(
             let (next_input, rhs) = parse_expression_internal(&next_input, &context, found_prec)?;
             Ok((
                 next_input,
-                Expression::UnaryOperation(Box::new(rhs), op_str),
+                Expression::UnaryOperation(found_pos.until(rhs.position()), Box::new(rhs), op_str),
             ))
         } else {
             Err(ParserErrorInfo::create(ParserErrorKind::Unknown))
@@ -314,7 +339,9 @@ pub fn parse_primary(
                 any_of_boxes(vec![
                     Box::from(map_parser_output(
                         parse_keyword("builtin".to_string()),
-                        |_| Expression::Builtin,
+                        |_, begin, end| {
+                            Expression::Builtin(PositionInfo::from_begin_and_end(begin, end))
+                        },
                     )),
                     Box::from(parse_literal_int),
                     Box::from(parse_unary_operator(context.clone())),
@@ -379,7 +406,12 @@ fn parse_expression_internal(
                             .with_cause0(&e)
                             .with_level(e.get_level() + 5)
                     })?;
-                lhs = Expression::BinaryOperation(Box::new(lhs), Box::new(rhs), op_str);
+                lhs = Expression::BinaryOperation(
+                    lhs.position().until(rhs.position()),
+                    Box::new(lhs),
+                    Box::new(rhs),
+                    op_str,
+                );
                 input = next_input;
             } else if let Some("left") = found_assoc {
                 let (_, next_input) = input
@@ -393,7 +425,12 @@ fn parse_expression_internal(
                                 .with_level(e.get_level() + 5)
                         },
                     )?;
-                lhs = Expression::BinaryOperation(Box::new(lhs), Box::new(rhs), op_str);
+                lhs = Expression::BinaryOperation(
+                    lhs.position().until(rhs.position()),
+                    Box::new(lhs),
+                    Box::new(rhs),
+                    op_str,
+                );
                 input = next_input;
             } else {
                 break;
@@ -421,7 +458,12 @@ pub fn parse_identifier(input: &ParserInput) -> Result<(ParserInput, Identifier)
                     |c| c == '_' || c.is_alphanumeric() || c.is_ascii_digit(),
                     "ALPHANUMERIC_OR_DIGIT_OR_UNDERSCORE",
                 )),
-                |v| Identifier::create(v.iter().collect()),
+                |v, begin, end| {
+                    Identifier::create(
+                        PositionInfo::from_begin_and_end(begin, end),
+                        v.iter().collect(),
+                    )
+                },
                 |_| ParserErrorInfo::create(ParserErrorKind::ExpectedIdentifier),
             ),
         ),
@@ -434,7 +476,7 @@ pub fn parse_type_base(
 ) -> Result<(ParserInput, ObjectTypeBase), ParserErrorInfo> {
     expect_input(input)?;
     run_parser(
-        map_parser_output(parse_identifier, |v| match v.0.as_str() {
+        map_parser_output(parse_identifier, |v, _, _| match v.name.as_str() {
             "i32" => ObjectTypeBase::Int32,
             "i64" => ObjectTypeBase::Int64,
             "u32" => ObjectTypeBase::UInt32,
@@ -473,12 +515,15 @@ pub fn parse_type_object(
 ) -> impl Fn(&ParserInput) -> Result<(ParserInput, Type), ParserErrorInfo> {
     move |input| {
         expect_input(input)?;
-        let (input, type_base) = skip_whitespaces(parse_type_base).run(input)?;
+        let begin = PositionInfo::from_parser_input_position(input);
+        let (input, type_base) = parse_type_base.run(input)?;
         let (input, generics) = parse_generics(&context, &input)?;
+        let end = PositionInfo::from_parser_input_position(&input);
 
         Ok((
             input,
             Type::Object {
+                position: begin.until(&end),
                 base: type_base,
                 generics,
             },
@@ -494,7 +539,7 @@ pub fn parse_type_proposition(
         run_parser(
             map_parser_output(
                 parse_proposition(context.clone()).increase_error_level(5),
-                Type::Proposition,
+                |prop, _, _| Type::Proposition(prop),
             ),
             input,
         )
@@ -525,7 +570,7 @@ pub fn parse_keyword(
             ParserErrorInfo::create(ParserErrorKind::Expected(format!("Keyword {}", kw)))
                 .with_level(e.get_level())
         })?;
-        if ident.0 != kw {
+        if ident.name != kw {
             Err(ParserErrorInfo::create(ParserErrorKind::ExpectedKeyword(
                 kw.clone(),
             )))
@@ -555,7 +600,11 @@ pub fn parse_proposition_property_of_expression(
 
         Ok((
             input,
-            Proposition::PropertyOfExpression(BoolProperty::UserDefined(property), expr),
+            Proposition::PropertyOfExpression(
+                property.position().until(expr.position()),
+                BoolProperty::UserDefined(property),
+                expr,
+            ),
         ))
     }
 }
@@ -581,6 +630,8 @@ pub fn parse_variable_declaration(
     context: Rc<ASTParserContext>,
 ) -> impl Fn(&ParserInput) -> Result<(ParserInput, Declaration), ParserErrorInfo> {
     move |input| {
+        let begin = PositionInfo::from_parser_input_position(input);
+
         let (input, _) = parse_keyword(KeyWords::kw_let()).run(input)?;
         let (mut input, name_ident) =
             skip_whitespaces(parse_identifier.force_increase_error_level(5)).run(&input)?;
@@ -595,7 +646,11 @@ pub fn parse_variable_declaration(
         }
 
         if let Ok((new_input, _)) = skip_whitespaces(parser_character(';')).run(&input) {
-            return Ok((new_input, Declaration::Variable(name_ident, var_type, None)));
+            let position = begin.until(&PositionInfo::from_parser_input_position(&new_input));
+            return Ok((
+                new_input,
+                Declaration::Variable(position, name_ident, var_type, None),
+            ));
         }
 
         let (input, _) = skip_whitespaces(parser_character('='))
@@ -622,7 +677,12 @@ pub fn parse_variable_declaration(
 
         Ok((
             input,
-            Declaration::Variable(name_ident, var_type, Some(Box::new(expr))),
+            Declaration::Variable(
+                begin.until(expr.position()),
+                name_ident,
+                var_type,
+                Some(Box::new(expr)),
+            ),
         ))
     }
 }
@@ -662,7 +722,8 @@ pub fn parse_namespace(
     context: Rc<ASTParserContext>,
 ) -> impl Fn(&ParserInput) -> Result<(ParserInput, Declaration), ParserErrorInfo> {
     move |input| {
-        let (rest, _) = skip_whitespaces(parse_keyword(KeyWords::kw_namespace())).run(input)?;
+        let (rest, kw_pos) =
+            skip_whitespaces(parse_keyword(KeyWords::kw_namespace())).run(input)?;
         let (rest, name) = skip_whitespaces(parse_identifier)
             .force_increase_error_level(5)
             .run(&rest)?;
@@ -678,7 +739,9 @@ pub fn parse_namespace(
             match parser_character('}').run(&rest) {
                 Err(_) => {}
                 Ok((remaining, _)) => {
-                    return Ok((remaining, Declaration::Namespace(name, decls)));
+                    let position =
+                        kw_pos.until(&PositionInfo::from_parser_input_position(&remaining));
+                    return Ok((remaining, Declaration::Namespace(position, name, decls)));
                 }
             }
             let parsed;
@@ -708,7 +771,7 @@ pub fn parse_function_declaration(
     context: Rc<ASTParserContext>,
 ) -> impl Fn(&ParserInput) -> Result<(ParserInput, Declaration), ParserErrorInfo> {
     move |input| {
-        let (rest, _) = skip_whitespaces(parse_keyword(KeyWords::kw_fn())).run(input)?;
+        let (rest, kw_pos) = skip_whitespaces(parse_keyword(KeyWords::kw_fn())).run(input)?;
 
         let (rest, fn_name) = skip_whitespaces(parse_identifier)
             .force_increase_error_level(5)
@@ -734,18 +797,23 @@ pub fn parse_function_declaration(
 
         let (rest, rtype) = match skip_whitespaces(parser_character(':')).run(&rest) {
             Err(_) => (rest, None),
-            Ok((rest, _)) => map_parser_output(skip_whitespaces(parse_type(context.clone())), Some)
+            Ok((rest, _)) => {
+                map_parser_output(skip_whitespaces(parse_type(context.clone())), |v, _, _| {
+                    Some(v)
+                })
                 .force_increase_error_level(5)
-                .run(&rest)?,
+                .run(&rest)?
+            }
         };
 
         let (rest, statement) = skip_whitespaces(parse_statement(context.clone()))
             .force_increase_error_level(5)
             .run(&rest)?;
 
+        let position = kw_pos.until(&PositionInfo::from_parser_input_position(&rest));
         Ok((
             rest,
-            Declaration::Function(fn_name, args, rtype, Some(Box::from(statement))),
+            Declaration::Function(position, fn_name, args, rtype, Some(Box::from(statement))),
         ))
     }
 }
@@ -793,11 +861,11 @@ pub fn parse_statement(
                     Box::from(parse_block(context.clone())),
                     Box::from(map_parser_output(
                         parse_statement_declaration(context.clone()),
-                        Statement::Declaration,
+                        |decl, _, _| Statement::Declaration(decl),
                     )),
                     Box::from(map_parser_output(
                         expect_semicolon(parse_expression(context.clone())),
-                        Statement::Expression,
+                        |expr, _, _| Statement::Expression(expr),
                     )),
                 ]),
                 elevate_highest_error(2),
@@ -817,7 +885,12 @@ pub fn parse_block(
                 and_then1(
                     map_parser(
                         repeat_at_least_0(skip_whitespaces(parse_statement(context.clone()))),
-                        |statements| Statement::Expression(Expression::Block(statements)),
+                        |statements, begin, end| {
+                            Statement::Expression(Expression::Block(
+                                PositionInfo::from_begin_and_end(begin, end),
+                                statements,
+                            ))
+                        },
                         |_| ParserErrorInfo::create(ParserErrorKind::Unknown),
                     ),
                     skip_whitespaces(parser_character('}')),
@@ -839,7 +912,7 @@ mod tests {
 
     macro_rules! assert_is_expression_literal_int {
         ($parsed: expr, $value: expr, $radix: expr) => {
-            if let Expression::LiteralInt(value, radix) = $parsed {
+            if let Expression::LiteralInt(_, value, radix) = $parsed {
                 assert_eq!(value, $value);
                 assert_eq!(radix, $radix);
             } else {
@@ -943,10 +1016,10 @@ mod tests {
             let input = ParserInput::create("15 + 2 * 5");
             let (rest, parsed) = run_parser(parse_expression(context.clone()), &input).unwrap();
             assert!(rest.is_empty());
-            if let Expression::BinaryOperation(lhs, rhs, op) = parsed.clone() {
+            if let Expression::BinaryOperation(_, lhs, rhs, op) = parsed.clone() {
                 assert_is_expression_literal_int!(*lhs, "15", 10);
                 assert_eq!(op, "+");
-                if let Expression::BinaryOperation(lhs, rhs, op) = *rhs {
+                if let Expression::BinaryOperation(_, lhs, rhs, op) = *rhs {
                     assert_is_expression_literal_int!(*lhs, "2", 10);
                     assert_is_expression_literal_int!(*rhs, "5", 10);
                     assert_eq!(op, "*");
@@ -961,10 +1034,10 @@ mod tests {
             let input = ParserInput::create("(63 - 7) * 0x11");
             let (rest, parsed) = run_parser(parse_expression(context.clone()), &input).unwrap();
             assert!(rest.is_empty());
-            if let Expression::BinaryOperation(lhs, rhs, op) = parsed.clone() {
+            if let Expression::BinaryOperation(_, lhs, rhs, op) = parsed.clone() {
                 assert_is_expression_literal_int!(*rhs, "11", 16);
                 assert_eq!(op, "*");
-                if let Expression::BinaryOperation(lhs, rhs, op) = *lhs {
+                if let Expression::BinaryOperation(_, lhs, rhs, op) = *lhs {
                     assert_is_expression_literal_int!(*lhs, "63", 10);
                     assert_is_expression_literal_int!(*rhs, "7", 10);
                     assert_eq!(op, "-");
@@ -979,10 +1052,10 @@ mod tests {
             let input = ParserInput::create("(63 + 7) * 0x11");
             let (rest, parsed) = run_parser(parse_expression(context.clone()), &input).unwrap();
             assert!(rest.is_empty());
-            if let Expression::BinaryOperation(lhs, rhs, op) = parsed.clone() {
+            if let Expression::BinaryOperation(_, lhs, rhs, op) = parsed.clone() {
                 assert_is_expression_literal_int!(*rhs, "11", 16);
                 assert_eq!(op, "*");
-                if let Expression::BinaryOperation(lhs, rhs, op) = *lhs {
+                if let Expression::BinaryOperation(_, lhs, rhs, op) = *lhs {
                     assert_is_expression_literal_int!(*lhs, "63", 10);
                     assert_is_expression_literal_int!(*rhs, "7", 10);
                     assert_eq!(op, "+");
@@ -1008,7 +1081,7 @@ mod tests {
             let input = ParserInput::create("--71");
             let (rest, parsed) = run_parser(parse_expression(context.clone()), &input).unwrap();
             assert!(rest.is_empty());
-            if let Expression::UnaryOperation(expr, op) = parsed.clone() {
+            if let Expression::UnaryOperation(_, expr, op) = parsed.clone() {
                 assert_eq!(op, "-");
                 assert_is_expression_literal_int!(*expr, "-71", 10);
             } else {
@@ -1019,11 +1092,11 @@ mod tests {
             let input = ParserInput::create("-~+-0b1101_1000");
             let (rest, parsed) = run_parser(parse_expression(context.clone()), &input).unwrap();
             assert!(rest.is_empty());
-            if let Expression::UnaryOperation(expr, op) = parsed.clone() {
+            if let Expression::UnaryOperation(_, expr, op) = parsed.clone() {
                 assert_eq!(op, "-");
-                if let Expression::UnaryOperation(expr, op) = *expr {
+                if let Expression::UnaryOperation(_, expr, op) = *expr {
                     assert_eq!(op, "~");
-                    if let Expression::UnaryOperation(expr, op) = *expr {
+                    if let Expression::UnaryOperation(_, expr, op) = *expr {
                         assert_eq!(op, "+");
                         assert_is_expression_literal_int!(*expr, "-11011000", 2);
                     } else {
@@ -1050,8 +1123,17 @@ mod tests {
                     assert_eq!(
                         e,
                         Expression::BinaryOperation(
-                            Box::new(Expression::LiteralInt("15".to_string(), 10)),
-                            Box::new(Expression::LiteralInt("6".to_string(), 10)),
+                            PositionInfo::create(0, 0, 0).until(&PositionInfo::create(4, 0, 4)),
+                            Box::new(Expression::LiteralInt(
+                                PositionInfo::create(0, 0, 0).until(&PositionInfo::create(2, 0, 2)),
+                                "15".to_string(),
+                                10
+                            )),
+                            Box::new(Expression::LiteralInt(
+                                PositionInfo::create(3, 0, 3).until(&PositionInfo::create(4, 0, 4)),
+                                "6".to_string(),
+                                10
+                            )),
                             "+".to_string()
                         )
                     );
@@ -1072,9 +1154,17 @@ mod tests {
             assert_eq!(
                 parsed,
                 Declaration::Variable(
-                    Identifier::new("x"),
+                    PositionInfo::create(0, 0, 0).until(&PositionInfo::create(12, 0, 12)),
+                    Identifier::new(
+                        PositionInfo::create(4, 0, 4).until(&PositionInfo::create(5, 0, 5)),
+                        "x"
+                    ),
                     None,
-                    Some(Box::from(Expression::LiteralInt("15".to_string(), 16)))
+                    Some(Box::from(Expression::LiteralInt(
+                        PositionInfo::create(8, 0, 8).until(&PositionInfo::create(12, 0, 12)),
+                        "15".to_string(),
+                        16
+                    )))
                 )
             )
         }
@@ -1086,12 +1176,22 @@ mod tests {
             assert_eq!(
                 parsed,
                 Declaration::Variable(
-                    Identifier::new("yy"),
+                    PositionInfo::create(0, 0, 0).until(&PositionInfo::create(20, 0, 20)),
+                    Identifier::new(
+                        PositionInfo::create(4, 0, 4).until(&PositionInfo::create(6, 0, 6)),
+                        "yy"
+                    ),
                     Some(Type::Object {
+                        position: PositionInfo::create(8, 0, 8)
+                            .until(&PositionInfo::create(11, 0, 11)),
                         base: ObjectTypeBase::UInt64,
                         generics: None
                     }),
-                    Some(Box::from(Expression::LiteralInt("-110".to_string(), 2)))
+                    Some(Box::from(Expression::LiteralInt(
+                        PositionInfo::create(14, 0, 14).until(&PositionInfo::create(20, 0, 20)),
+                        "-110".to_string(),
+                        2
+                    )))
                 )
             )
         }

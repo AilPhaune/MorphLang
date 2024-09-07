@@ -155,7 +155,7 @@ impl HasLen for ParserInput {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PositionInfo {
     pub start_index: usize,
     pub start_line: usize,
@@ -173,8 +173,12 @@ impl PositionInfo {
             start_line_index,
             end_index: start_index,
             end_line: start_line,
-            end_line_index: start_line,
+            end_line_index: start_line_index,
         }
+    }
+
+    pub fn from_begin_and_end(begin: &ParserInput, end: &ParserInput) -> Self {
+        Self::from_parser_input_position(begin).until(&Self::from_parser_input_position(end))
     }
 
     pub fn from_parser_input_position(p: &ParserInput) -> Self {
@@ -537,7 +541,7 @@ where
 ///
 /// let input = ParserInput::create("your input");
 /// let parser = repeat_at_least_1(parser_character_predicate(char::is_alphabetic, "ALPHABETIC")); // This parser return a Vec<char>
-/// let mapped_parser = map_parser_output(parser, |v| v.iter().collect::<String>());
+/// let mapped_parser = map_parser_output(parser, |v, _begin, _end| v.iter().collect::<String>());
 ///
 /// match mapped_parser.run(&input) {
 ///     Err(e) => panic!("Parser wasn't supposed to fail !"),
@@ -553,12 +557,13 @@ pub fn map_parser_output<InputType: Clone, OutputType1, OutputType2, ErrorType, 
 ) -> impl Fn(&InputType) -> Result<(InputType, OutputType2), ErrorType>
 where
     P: Parser<InputType, ErrorType, OutputType1>,
-    F: Fn(OutputType1) -> OutputType2,
+    F: Fn(OutputType1, &InputType, &InputType) -> OutputType2,
 {
     move |input| {
-        parser
-            .run(input)
-            .map(|(remaining_input, parsed)| (remaining_input, mapper_function(parsed)))
+        parser.run(input).map(|(remaining_input, parsed)| {
+            let output = mapper_function(parsed, input, &remaining_input);
+            (remaining_input, output)
+        })
     }
 }
 
@@ -570,13 +575,16 @@ pub fn map_parser<InputType: Clone, OutputType1, OutputType2, ErrorType1, ErrorT
 ) -> impl Fn(&InputType) -> Result<(InputType, OutputType2), ErrorType2>
 where
     P: Parser<InputType, ErrorType1, OutputType1>,
-    F1: Fn(OutputType1) -> OutputType2,
+    F1: Fn(OutputType1, &InputType, &InputType) -> OutputType2,
     F2: Fn(ErrorType1) -> ErrorType2,
 {
     move |input| {
         parser
             .run(input)
-            .map(|(remaining_input, parsed)| (remaining_input, output_mapper(parsed)))
+            .map(|(remaining_input, parsed)| {
+                let output = output_mapper(parsed, input, &remaining_input);
+                (remaining_input, output)
+            })
             .map_err(&error_mapper)
     }
 }
@@ -1312,7 +1320,7 @@ mod tests {
                 char::is_alphabetic,
                 "ALPHABETIC",
             ));
-            let mapped_parser = map_parser_output(parser, |v| {
+            let mapped_parser = map_parser_output(parser, |v, _, _| {
                 v.iter().collect::<String>().to_ascii_uppercase()
             });
             let (remaining_input, parsed) = run_parser(&mapped_parser, &input).unwrap();
@@ -1330,7 +1338,7 @@ mod tests {
         ));
         let mapped_parser = map_parser(
             parser,
-            |v| v.iter().collect::<String>().to_ascii_uppercase(),
+            |v, _, _| v.iter().collect::<String>().to_ascii_uppercase(),
             |_| "mapped error",
         );
         {

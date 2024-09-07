@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use crate::{parsing::ast::Identifier, type_checker::types::Type};
+use crate::{
+    parsing::{ast::Identifier, combinators::PositionInfo},
+    type_checker::types::Type,
+};
 
 #[derive(Clone, Debug)]
 pub enum SymbolError {
@@ -20,37 +23,49 @@ pub enum DeclaredType {
 #[derive(Clone, Debug)]
 pub enum Symbol {
     /// The declaration of a type
-    TypeDeclaration(DeclaredType),
+    TypeDeclaration(PositionInfo, DeclaredType),
 
     /// The declaration of a function
     FunctionDeclaration {
+        position: PositionInfo,
         declared_signature: Vec<Option<Type>>,
         resolved_signature: Option<Vec<Type>>,
     },
 
     /// The declaration of a variable
     VariableDeclaration {
+        position: PositionInfo,
         declared_type: Option<Type>,
         resolved_type: Option<Type>,
     },
 
     /// The declaration of a namespace
-    Namespace,
+    Namespace(PositionInfo),
 
     /// The declaration of an anonymous block
-    Block,
+    Block(PositionInfo),
 }
 
 impl Symbol {
+    pub fn position(&self) -> &PositionInfo {
+        match self {
+            Self::TypeDeclaration(pos, ..)
+            | Self::FunctionDeclaration { position: pos, .. }
+            | Self::VariableDeclaration { position: pos, .. }
+            | Self::Block(pos, ..)
+            | Self::Namespace(pos, ..) => pos,
+        }
+    }
+
     pub fn is_same(&self, other: &Self) -> bool {
         match self {
-            Self::Namespace => matches!(other, Self::Namespace),
-            Self::TypeDeclaration(_) => matches!(other, Self::TypeDeclaration(_)),
+            Self::Namespace(..) => matches!(other, Self::Namespace(..)),
+            Self::TypeDeclaration(..) => matches!(other, Self::TypeDeclaration(..)),
             Self::FunctionDeclaration { .. } | Self::VariableDeclaration { .. } => matches!(
                 other,
                 Self::FunctionDeclaration { .. } | Self::VariableDeclaration { .. }
             ),
-            Self::Block => matches!(other, Self::Block),
+            Self::Block(..) => matches!(other, Self::Block(..)),
         }
     }
 }
@@ -66,15 +81,15 @@ pub struct SymbolTable {
 impl SymbolTable {
     pub fn new() -> Result<Self, SymbolError> {
         let mut def = Self::default();
-        def.add_symbol("", Symbol::Namespace)?;
-        def.add_symbol("@binops", Symbol::Namespace)?;
-        def.add_symbol("@unops", Symbol::Namespace)?;
+        def.add_symbol("", Symbol::Namespace(PositionInfo::create(0, 0, 0)))?;
+        def.add_symbol("@binops", Symbol::Namespace(PositionInfo::create(0, 0, 0)))?;
+        def.add_symbol("@unops", Symbol::Namespace(PositionInfo::create(0, 0, 0)))?;
         Ok(def)
     }
 
     pub fn get_child_name(&self, path: &str, child: &str) -> Result<String, SymbolError> {
         match self.find_symbol(path)? {
-            Symbol::TypeDeclaration(_) | Symbol::Namespace | Symbol::Block => {
+            Symbol::TypeDeclaration(..) | Symbol::Namespace(..) | Symbol::Block(..) => {
                 Ok(format!("{}::{}", path, child))
             }
             Symbol::FunctionDeclaration { .. } => Ok(format!("{}${}", path, child)),
@@ -100,10 +115,12 @@ impl SymbolTable {
         &mut self,
         path: &str,
         declared_type: Option<Type>,
+        position: PositionInfo,
     ) -> Result<(), SymbolError> {
         self.add_symbol(
             path,
             Symbol::VariableDeclaration {
+                position,
                 declared_type,
                 resolved_type: None,
             },
@@ -115,16 +132,18 @@ impl SymbolTable {
         path: &str,
         args: Vec<(Identifier, Type)>,
         rtype: Option<Type>,
+        position: PositionInfo,
     ) -> Result<(), SymbolError> {
         let mut declared_signature: Vec<Option<Type>> =
             args.iter().map(|(_, t)| Some(t).cloned()).collect();
         if declared_signature.is_empty() {
-            declared_signature.push(Some(Type::void()));
+            declared_signature.push(Some(Type::void(position.clone())));
         }
         declared_signature.push(rtype);
         self.add_symbol(
             path,
             Symbol::FunctionDeclaration {
+                position,
                 declared_signature,
                 resolved_signature: None,
             },

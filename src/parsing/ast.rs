@@ -2,6 +2,8 @@ use core::fmt;
 
 use crate::type_checker::types::Type;
 
+use super::combinators::PositionInfo;
+
 #[derive(Debug, Clone)]
 pub enum BinaryOperatorPrecedence {
     LeftAssociative(u64, String),
@@ -22,24 +24,44 @@ impl UnaryOperatorPrecedence {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Identifier(pub String);
+pub struct Identifier {
+    pub name: String,
+    pub position: PositionInfo,
+}
+
 impl Identifier {
-    pub fn new(s: &str) -> Self {
-        Self(s.to_owned())
+    pub fn new(position: PositionInfo, name: &str) -> Self {
+        Self::create(position, name.to_string())
     }
 
-    pub fn create(s: String) -> Self {
-        Self(s)
+    pub fn create(position: PositionInfo, name: String) -> Self {
+        Self { name, position }
+    }
+
+    pub fn position(&self) -> &PositionInfo {
+        &self.position
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Expression {
-    Builtin,
-    LiteralInt(String, i32),
-    BinaryOperation(Box<Expression>, Box<Expression>, String),
-    UnaryOperation(Box<Expression>, String),
-    Block(Vec<Statement>),
+    Builtin(PositionInfo),
+    LiteralInt(PositionInfo, String, i32),
+    BinaryOperation(PositionInfo, Box<Expression>, Box<Expression>, String),
+    UnaryOperation(PositionInfo, Box<Expression>, String),
+    Block(PositionInfo, Vec<Statement>),
+}
+
+impl Expression {
+    pub fn position(&self) -> &PositionInfo {
+        match self {
+            Self::Builtin(pos, ..)
+            | Self::LiteralInt(pos, ..)
+            | Self::BinaryOperation(pos, ..)
+            | Self::UnaryOperation(pos, ..)
+            | Self::Block(pos, ..) => pos,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,14 +72,28 @@ pub enum Statement {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Declaration {
-    Variable(Identifier, Option<Type>, Option<Box<Expression>>),
+    Variable(
+        PositionInfo,
+        Identifier,
+        Option<Type>,
+        Option<Box<Expression>>,
+    ),
     Function(
+        PositionInfo,
         Identifier,
         Vec<(Identifier, Type)>,
         Option<Type>,
         Option<Box<Statement>>,
     ),
-    Namespace(Identifier, Vec<Declaration>),
+    Namespace(PositionInfo, Identifier, Vec<Declaration>),
+}
+
+impl Declaration {
+    pub fn position(&self) -> &PositionInfo {
+        match self {
+            Self::Variable(pos, ..) | Self::Function(pos, ..) | Self::Namespace(pos, ..) => pos,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
