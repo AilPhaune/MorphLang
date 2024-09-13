@@ -330,6 +330,20 @@ pub fn parse_unary_operator(
     }
 }
 
+pub fn parse_identifier_chain(
+    input: &ParserInput,
+) -> Result<(ParserInput, Expression), ParserErrorInfo> {
+    let begin = PositionInfo::from_parser_input_position(input);
+    let (rest, ident) = parse_identifier.run(input)?;
+    let end = PositionInfo::from_parser_input_position(&rest);
+
+    // TODO: Parse chains later, now just supports one identifier
+    Ok((
+        rest,
+        Expression::Identifiers(begin.until(&end), vec![ident]),
+    ))
+}
+
 pub fn parse_primary(
     context: Rc<ASTParserContext>,
 ) -> impl Fn(&ParserInput) -> Result<(ParserInput, Expression), ParserErrorInfo> {
@@ -344,6 +358,7 @@ pub fn parse_primary(
                         },
                     )),
                     Box::from(parse_literal_int),
+                    Box::from(parse_identifier_chain),
                     Box::from(parse_unary_operator(context.clone())),
                     Box::from(parse_parenthesis_expression(context.clone())),
                 ]),
@@ -398,7 +413,7 @@ fn parse_expression_internal(
         if let Some(op_str) = found_op {
             if let Some("right") = found_assoc {
                 let (_, next_input) = input
-                    .advance_by(op_str.len())
+                    .advance_by(op_str.chars().count())
                     .ok_or(ParserErrorInfo::create(ParserErrorKind::EndOfFile))?;
                 let (next_input, rhs) = parse_expression_internal(&next_input, context, found_prec)
                     .map_err(|e| {
@@ -415,7 +430,7 @@ fn parse_expression_internal(
                 input = next_input;
             } else if let Some("left") = found_assoc {
                 let (_, next_input) = input
-                    .advance_by(op_str.len())
+                    .advance_by(op_str.chars().count())
                     .ok_or(ParserErrorInfo::create(ParserErrorKind::EndOfFile))?;
                 let (next_input, rhs) =
                     parse_expression_internal(&next_input, context, found_prec + 1).map_err(

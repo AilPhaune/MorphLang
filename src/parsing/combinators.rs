@@ -70,7 +70,7 @@ pub enum Either3<A, B, C> {
 
 #[derive(Debug, Clone)]
 pub struct ParserInput {
-    pub code: Rc<String>,
+    pub code: Rc<Vec<char>>,
     pub source_code_file_index: usize,
     pub current_index: usize,
     pub current_line: usize,
@@ -81,7 +81,7 @@ impl ParserInput {
     pub fn create(code: &str) -> Self {
         Self {
             source_code_file_index: 0,
-            code: Rc::new(code.to_string()),
+            code: Rc::new(code.to_string().chars().collect()),
             current_index: 0,
             current_line: 0,
             current_line_index: 0,
@@ -91,7 +91,7 @@ impl ParserInput {
     pub fn create_from_string(code: String) -> Self {
         Self {
             source_code_file_index: 1,
-            code: Rc::new(code),
+            code: Rc::new(code.chars().collect()),
             current_index: 0,
             current_line: 0,
             current_line_index: 0,
@@ -99,11 +99,13 @@ impl ParserInput {
     }
 
     pub fn get_char(&self) -> Option<char> {
-        self.code.chars().nth(self.current_index)
+        self.code.get(self.current_index).copied()
     }
 
     pub fn get_char_relative(&self, index: isize) -> Option<char> {
-        self.code.chars().nth(self.current_index + (index as usize))
+        self.code
+            .get(self.current_index + (index as usize))
+            .copied()
     }
 
     pub fn advance(&self) -> Option<(char, ParserInput)> {
@@ -147,7 +149,7 @@ impl ParserInput {
 
     pub fn get_as_string(&self) -> String {
         self.code
-            .chars()
+            .iter()
             .skip(self.current_index)
             .collect::<String>()
     }
@@ -245,7 +247,7 @@ impl PositionInfo {
     pub fn get_as_string(&self, parser_input: ParserInput) -> String {
         parser_input
             .code
-            .chars()
+            .iter()
             .skip(self.start_index)
             .take(self.len())
             .collect::<String>()

@@ -65,6 +65,7 @@ pub enum Expression {
     BinaryOperation(PositionInfo, Box<Expression>, Box<Expression>, String),
     UnaryOperation(PositionInfo, Box<Expression>, String),
     Block(PositionInfo, Vec<Statement>),
+    Identifiers(PositionInfo, Vec<Identifier>),
 }
 
 impl Expression {
@@ -75,7 +76,8 @@ impl Expression {
             | Self::BinaryOperation(pos, ..)
             | Self::UnaryOperation(pos, ..)
             | Self::Block(pos, ..)
-            | Self::LiteralString(pos, ..) => pos,
+            | Self::LiteralString(pos, ..)
+            | Self::Identifiers(pos, ..) => pos,
         }
     }
 }

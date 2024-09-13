@@ -102,6 +102,14 @@ impl TypeEvaluator {
         expression: &Expression,
     ) -> Result<Type, TypeError> {
         match expression {
+            Expression::Identifiers(pos, idents) => {
+                // TODO:
+                Ok(Type::Object {
+                    position: *pos,
+                    base: ObjectTypeBase::Void,
+                    generics: None,
+                })
+            }
             Expression::LiteralString(pos, _) => Ok(Type::Object {
                 position: *pos,
                 base: ObjectTypeBase::String,
