@@ -242,7 +242,7 @@ impl Preprocessor {
                         self.context.binary_operators.push(binary);
                     }
                 }
-                *line = String::new();
+                line.clear();
                 return Ok(());
             }
 
@@ -262,6 +262,13 @@ impl Preprocessor {
             idx += 1;
             if character == '#' {
                 preprocessor_line = true;
+                break;
+            }
+            if character == '/' && line.chars().nth(idx) == Some('/') {
+                line.clear();
+                break;
+            }
+            if !character.is_whitespace() {
                 break;
             }
         }

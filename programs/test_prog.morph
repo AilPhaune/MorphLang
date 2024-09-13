@@ -1,8 +1,11 @@
 #operator unary "~" 50
+#operator binary "=" assoc_left 10
 #operator binary "+" assoc_left 100
 
 namespace a {
     fn main() {
-        let x = 15 + ~5;
+        // parser doesn't support not assigning the variable yet
+        // by the way the comments only work in the begining of line
+        let x: (1+1 = 2) is true = 0;
     }
 }
