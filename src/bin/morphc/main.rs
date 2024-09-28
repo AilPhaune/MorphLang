@@ -33,7 +33,7 @@ pub fn main() -> Result<()> {
 
     let result = match run_parser(&parser, &input) {
         Err(e) => {
-            panic!("Error: {:#?}\n\n{}", e, e.pretty_print(0, 1));
+            panic!("Error: {:#?}\n\n{}", e, e.pretty_print(0, 0));
         }
         Ok((_, ast)) => ast,
     };

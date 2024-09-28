@@ -22,53 +22,13 @@ pub enum ObjectTypeBase {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum BoolProperty {
-    UserDefined(Identifier),
-}
-
-impl BoolProperty {
-    pub fn position(&self) -> &PositionInfo {
-        match self {
-            Self::UserDefined(ident) => ident.position(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum BoolPropertyFunction {
-    UserDefined(Identifier),
-}
-
-impl BoolPropertyFunction {
-    pub fn position(&self) -> &PositionInfo {
-        match self {
-            Self::UserDefined(ident) => ident.position(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Proposition {
-    PropertyOfExpression(PositionInfo, BoolProperty, Expression),
-    FunctionOfExpressions(PositionInfo, BoolPropertyFunction, Vec<Expression>),
-}
-
-impl Proposition {
-    pub fn position(&self) -> &PositionInfo {
-        match self {
-            Self::PropertyOfExpression(pos, ..) | Self::FunctionOfExpressions(pos, ..) => pos,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
     Object {
         position: PositionInfo,
         base: ObjectTypeBase,
         generics: Option<Vec<Type>>,
     },
-    Proposition(Proposition),
+    Proposition(Expression),
     Never(PositionInfo),
 }
 

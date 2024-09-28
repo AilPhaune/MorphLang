@@ -1,6 +1,8 @@
 use core::fmt;
 use std::rc::Rc;
 
+use crate::preprocessor::PreprocessorError;
+
 use super::ast::ExpressionKind;
 
 #[derive(Debug, Clone)]
@@ -157,6 +159,7 @@ pub enum ParserErrorKind {
     ExpectedIdentifier,
     ExpectedKeyword(String),
     Expected(String),
+    Preprocessor(PreprocessorError),
 }
 
 impl fmt::Display for ParserErrorKind {
@@ -169,6 +172,7 @@ impl fmt::Display for ParserErrorKind {
             Self::EndOfFile => write!(f, "Unexpected end of input"),
             Self::UnexpectedInput => write!(f, "Unexpected input"),
             Self::ExpectedKeyword(kw) => write!(f, "Expected keyword: {}", kw),
+            Self::Preprocessor(err) => write!(f, "Preprocessor error: {}", err),
             Self::ExpectedToken { token } => {
                 write!(f, "Expected token: {}", token)
             }

@@ -17,3 +17,8 @@ Morph, a functional and imperative programming language.
 ```sh
 cargo run --example combinators
 ```
+
+### Run the compiler
+```sh
+cargo run --bin morphc <input_file>
+```

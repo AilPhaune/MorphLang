@@ -13,9 +13,9 @@ use morphlang::{
         astparser::{
             parse_bin_literal_int, parse_decimal_literal_int, parse_expression,
             parse_hex_literal_int, parse_identifier, parse_literal_int, parse_oct_literal_int,
-            parse_proposition, parse_statement, parse_type, parse_type_base, ASTParserContext,
+            parse_statement, parse_type, parse_type_base, ASTParserContext,
         },
-        combinators::{delimited, parser_character, ParserInput},
+        combinators::{delimited, parser_character, parser_nothing, ParserInput},
         error::ParserErrorInfo,
         parser::Parser,
     },
@@ -312,11 +312,10 @@ fn update_display(
         len_counter,
     )?;
     write_combinator_output(parse_type_base, input, "type base: ", len_counter)?;
-    write_combinator_output(parse_type(context.clone()), input, "type: ", len_counter)?;
     write_combinator_output(
-        parse_proposition(context.clone()),
+        parse_type(context.clone(), parser_nothing()),
         input,
-        "proposition: ",
+        "type: ",
         len_counter,
     )?;
     write_combinator_output(

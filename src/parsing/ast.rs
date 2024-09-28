@@ -18,6 +18,13 @@ impl BinaryOperatorPrecedence {
             Self::LeftAssociative(_, op) | Self::RightAssociative(_, op) => op,
         })
     }
+
+    pub fn get(&self) -> (&u64, &String, bool) {
+        match self {
+            Self::LeftAssociative(prec, op) => (prec, op, false),
+            Self::RightAssociative(prec, op) => (prec, op, true),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

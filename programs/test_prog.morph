@@ -1,12 +1,20 @@
 #operator unary "~" 50
-#operator binary "∧" assoc_left 200
-#operator binary "=" assoc_left 300
+
+#operator binary "*" assoc_left 2000
+#operator binary "/" assoc_left 2000
+
+#operator binary "+" assoc_left 1000
+#operator binary "-" assoc_left 1000
+
+#operator binary "∧" assoc_left 500
+
+#operator binary "==" assoc_left 300
+#operator binary "!=" assoc_left 300
+
 #operator binary "→" assoc_right 100
 
 namespace a {
     fn main() {
-        // parser doesn't support not assigning the variable yet
-        // by the way the comments only work in the begining of line
-        let x: (a = b ∧ b = c → (a = c)) is true = 0;
+        let x: 5 = 5;
     }
 }

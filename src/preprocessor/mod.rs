@@ -1,3 +1,5 @@
+use core::fmt;
+
 use crate::{
     parsing::{
         ast::{BinaryOperatorPrecedence, Expression, UnaryOperatorPrecedence},
@@ -14,6 +16,18 @@ use crate::{
 #[derive(Clone, Debug, Default)]
 pub struct Preprocessor {
     pub context: ASTParserContext,
+}
+
+impl fmt::Display for PreprocessorError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::ReservedOperator(op) => write!(f, "Operator \"{}\" is reserved", op),
+            Self::OperatorAlreadyDefined(op) => write!(f, "Operator \"{}\" already defined", op),
+            Self::UnknownDirective(directive, ..) => {
+                write!(f, "Unknown directive \"{}\"", directive)
+            }
+        }
+    }
 }
 
 fn to_lines(input: String, lines: &mut Vec<String>) {
@@ -197,7 +211,8 @@ fn parse_operator_definition(
 #[derive(Debug, Clone)]
 pub enum PreprocessorError {
     UnknownDirective(String, Vec<ParserErrorInfo>),
-    OperatorAlreadyDefined,
+    OperatorAlreadyDefined(String),
+    ReservedOperator(String),
 }
 
 impl Preprocessor {
@@ -220,24 +235,34 @@ impl Preprocessor {
             Ok((_, parsed)) => {
                 match parsed {
                     Either::First(unary) => {
+                        if unary.get().1 == "=" {
+                            Err(PreprocessorError::ReservedOperator("=".to_string()))?
+                        }
                         if self
                             .context
                             .unary_operators
                             .iter()
                             .any(|op| op.is_same_operator(&unary))
                         {
-                            Err(PreprocessorError::OperatorAlreadyDefined)?
+                            Err(PreprocessorError::OperatorAlreadyDefined(
+                                unary.get().1.clone(),
+                            ))?
                         }
                         self.context.unary_operators.push(unary);
                     }
                     Either::Second(binary) => {
+                        if binary.get().1 == "=" {
+                            Err(PreprocessorError::ReservedOperator("=".to_string()))?
+                        }
                         if self
                             .context
                             .binary_operators
                             .iter()
                             .any(|op| op.is_same_operator(&binary))
                         {
-                            Err(PreprocessorError::OperatorAlreadyDefined)?
+                            Err(PreprocessorError::OperatorAlreadyDefined(
+                                binary.get().1.clone(),
+                            ))?
                         }
                         self.context.binary_operators.push(binary);
                     }

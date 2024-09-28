@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use crate::{
     traits::has_len::HasLen,
-    type_checker::types::{BoolProperty, ObjectTypeBase, Proposition, Type},
+    type_checker::types::{ObjectTypeBase, Type},
 };
 
 use super::{
@@ -513,7 +513,13 @@ pub fn parse_generics(
             and_then1(
                 delimited(
                     skip_whitespaces(parser_character(',')),
-                    skip_whitespaces(parse_type(context.clone())),
+                    skip_whitespaces(parse_type(
+                        context.clone(),
+                        parser_character_predicate(
+                            |c| c == ',' || c == '>',
+                            "PREDICATE_COMMA_OR_END_OF_GENERICS",
+                        ),
+                    )),
                     true,
                 ),
                 skip_whitespaces(parser_character('>')),
@@ -550,29 +556,41 @@ pub fn parse_type_proposition(
     context: Rc<ASTParserContext>,
 ) -> impl Fn(&ParserInput) -> Result<(ParserInput, Type), ParserErrorInfo> {
     move |input| {
-        expect_input(input)?;
-        run_parser(
-            map_parser_output(
-                parse_proposition(context.clone()).increase_error_level(5),
-                |prop, _, _| Type::Proposition(prop),
-            ),
-            input,
-        )
+        map_parser_output(parse_expression(context.clone()), |expr, _, _| {
+            Type::Proposition(expr)
+        })
+        .increase_error_level(5)
+        .run(input)
     }
 }
 
-pub fn parse_type(
+pub fn parse_type<T: 'static, P>(
     context: Rc<ASTParserContext>,
-) -> impl Fn(&ParserInput) -> Result<(ParserInput, Type), ParserErrorInfo> {
+    ends_with_parser: P,
+) -> impl Fn(&ParserInput) -> Result<(ParserInput, Type), ParserErrorInfo>
+where
+    P: Fn(&ParserInput) -> Result<(ParserInput, T), ParserErrorInfo>,
+{
     move |input| {
-        let p = map_parser_error(
-            any_of_boxes(vec![
-                Box::from(parse_type_proposition(context.clone())),
-                Box::from(parse_type_object(context.clone())),
-            ]),
-            elevate_highest_error(2),
-        );
-        run_parser(p, input)
+        let mut errs: Vec<ParserErrorInfo> = Vec::new();
+
+        match parse_type_object(context.clone()).run(input) {
+            Err(e) => errs.push(e),
+            Ok(v) => match ends_with_parser.run(&v.0) {
+                Err(e) => errs.push(e),
+                Ok(..) => return Ok(v),
+            },
+        }
+
+        match parse_expression(context.clone()).run(input) {
+            Err(e) => errs.push(e),
+            Ok(v) => match ends_with_parser.run(&v.0) {
+                Err(e) => errs.push(e),
+                Ok(..) => return Ok((v.0, Type::Proposition(v.1))),
+            },
+        }
+
+        Err(elevate_highest_error(2)(errs))
     }
 }
 
@@ -596,51 +614,6 @@ pub fn parse_keyword(
     }
 }
 
-pub fn parse_proposition_property_of_expression(
-    context: Rc<ASTParserContext>,
-) -> impl Fn(&ParserInput) -> Result<(ParserInput, Proposition), ParserErrorInfo> {
-    move |input| {
-        expect_input(input)?;
-        let (input, expr) = parse_expression(context.clone()).run(input)?;
-        let (input, _) =
-            skip_whitespaces(parse_keyword(KeyWords::kw_is()).force_increase_error_level(1))
-                .run(&input)?;
-        let (input, property) = skip_whitespaces(parse_identifier.force_increase_error_level(5))
-            .run(&input)
-            .map_err(|e| {
-                ParserErrorInfo::create(ParserErrorKind::Expected("property name".to_string()))
-                    .with_level(e.get_level())
-                    .with_cause0(&e)
-            })?;
-
-        Ok((
-            input,
-            Proposition::PropertyOfExpression(
-                property.position().until(expr.position()),
-                BoolProperty::UserDefined(property),
-                expr,
-            ),
-        ))
-    }
-}
-
-pub fn parse_proposition(
-    context: Rc<ASTParserContext>,
-) -> impl Fn(&ParserInput) -> Result<(ParserInput, Proposition), ParserErrorInfo> {
-    move |input| {
-        expect_input(input)?;
-        run_parser(
-            skip_whitespaces(map_parser_error(
-                any_of(vec![parse_proposition_property_of_expression(
-                    context.clone(),
-                )]),
-                elevate_highest_error(2),
-            )),
-            input,
-        )
-    }
-}
-
 pub fn parse_variable_declaration(
     context: Rc<ASTParserContext>,
 ) -> impl Fn(&ParserInput) -> Result<(ParserInput, Declaration), ParserErrorInfo> {
@@ -654,8 +627,11 @@ pub fn parse_variable_declaration(
         let mut var_type = None;
 
         if let Ok((new_input, _)) = skip_whitespaces(parser_character(':')).run(&input) {
-            let (new_input, parsed_type) =
-                skip_whitespaces(parse_type(context.clone())).run(&new_input)?;
+            let (new_input, parsed_type) = skip_whitespaces(parse_type(
+                context.clone(),
+                skip_whitespaces(parser_character('=')),
+            ))
+            .run(&new_input)?;
             var_type = Some(parsed_type);
             input = new_input;
         }
@@ -774,9 +750,15 @@ pub fn parse_function_parameter(
         let (rest, _) = skip_whitespaces(parser_character(':'))
             .force_increase_error_level(1)
             .run(&rest)?;
-        let (rest, ptype) = parse_type(context.clone())
-            .force_increase_error_level(2)
-            .run(&rest)?;
+        let (rest, ptype) = parse_type(
+            context.clone(),
+            skip_whitespaces(parser_character_predicate(
+                |c| c == ',' || c == ')',
+                "PREDICATE_COMMA_OR_END_FUNCTION_PARAMETERS",
+            )),
+        )
+        .force_increase_error_level(2)
+        .run(&rest)?;
 
         Ok((rest, (name, ptype)))
     }
@@ -812,13 +794,15 @@ pub fn parse_function_declaration(
 
         let (rest, rtype) = match skip_whitespaces(parser_character(':')).run(&rest) {
             Err(_) => (rest, None),
-            Ok((rest, _)) => {
-                map_parser_output(skip_whitespaces(parse_type(context.clone())), |v, _, _| {
-                    Some(v)
-                })
-                .force_increase_error_level(5)
-                .run(&rest)?
-            }
+            Ok((rest, _)) => map_parser_output(
+                skip_whitespaces(parse_type(
+                    context.clone(),
+                    skip_whitespaces(parser_character('{')),
+                )),
+                |v, _, _| Some(v),
+            )
+            .force_increase_error_level(5)
+            .run(&rest)?,
         };
 
         let (rest, statement) = skip_whitespaces(parse_statement(context.clone()))

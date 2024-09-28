@@ -102,7 +102,7 @@ impl TypeEvaluator {
         expression: &Expression,
     ) -> Result<Type, TypeError> {
         match expression {
-            Expression::Identifiers(pos, idents) => {
+            Expression::Identifiers(pos, _idents) => {
                 // TODO:
                 Ok(Type::Object {
                     position: *pos,
